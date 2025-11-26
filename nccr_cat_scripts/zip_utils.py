@@ -484,12 +484,12 @@ def cli():
     """Configures and runs the command line interface."""
     parser = argparse.ArgumentParser(
         description="A utility for extracting, compressing, and cleaning zip archives, particularly with relation to Zenodo datasets.",
-        help="""Use one of the following commands: 
-            clean: process a zip file and remove any system file or redundant folder tree level,
-            zip: zip any folder at a given path without redundant levels,
-            extract: extract recursively ignoring system files
+        # help="""Use one of the following commands: 
+        #     clean: process a zip file and remove any system file or redundant folder tree level,
+        #     zip: zip any folder at a given path without redundant levels,
+        #     extract: extract recursively ignoring system files
             
-        """
+        # """
     )
     # Define a subparser to handle different commands (clean or naked)
     subparsers = parser.add_subparsers(dest='command', required=True)
