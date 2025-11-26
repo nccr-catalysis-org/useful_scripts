@@ -35,9 +35,8 @@ setup(
     # This section defines the command-line executables
     entry_points={
         'console_scripts': [
-            # The CLI command will be 'nccr-zip'. 
-            # It executes the 'cli' function inside 'nccr_cat_scripts.zip_utils'.
             'zip-utils = nccr_cat_scripts.zip_utils:cli',
+            'excel-utils = nccr_cat_scripts.excel_utils:cli',
         ],
     },
     
