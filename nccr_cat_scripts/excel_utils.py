@@ -12,14 +12,16 @@ Created on Tue Sep 2 14:35:40 2025
 
 @author: nr
 """
-import os
-import shutil as sh
-from openpyxl import load_workbook
-from openpyxl.utils.cell import get_column_letter, column_index_from_string
-import re
 import argparse
 import logging
-from typing import Optional, Tuple, Dict, Any, Pattern, Callable, Match
+import os
+import re
+import shutil as sh
+from typing import Any, Callable, Dict, List, Match, Optional, Pattern, Tuple
+
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.utils.cell import column_index_from_string, get_column_letter
 
 # --- Logger Setup ---
 logger = logging.getLogger(__name__)
@@ -37,6 +39,10 @@ logger.addHandler(handler)
 # 1. Sheet Name part (optional, group 1): (?:'([^']+)'!)? OR ([A-Za-z0-9_]+!)?
 #    - We use the simpler version here: capture (SheetName!)? or (CellRef)
 CELL_REF_REGEX: Pattern[str] = re.compile(r"((?:'[^']+'!)?|(?:\w+!)?)([A-Z]+)(\d+)")
+
+class InvalidFileFormatError(ValueError):
+    """Raised when the file content does not match the expected format or schema."""
+    pass
 
 
 def get_padding_info(worksheet) -> Tuple[int, int]:
@@ -158,7 +164,7 @@ def update_cross_sheet_formula(
     return CELL_REF_REGEX.sub(replace_cell_ref, formula)
 
 
-def process_excel_file(filename: str, outname: str, unpad: bool, strip_text: bool) -> bool:
+def process_xlsx_file(filename: str, outname: str, unpad: bool, strip_text: bool) -> bool:
     """
     Core function to process an Excel file:
     1. Determines padding for all sheets.
@@ -184,7 +190,7 @@ def process_excel_file(filename: str, outname: str, unpad: bool, strip_text: boo
     try:
         wb = load_workbook(filename)
     except Exception as e:
-        logger.error(f"Error loading workbook {os.path.basename(filename)}: {e}")
+        logger.error(f"Error loading workbook {filename}: {e}")
         sh.copy(filename, outname) # Copy source to destination for safety
         return False
 
@@ -269,6 +275,86 @@ def process_excel_file(filename: str, outname: str, unpad: bool, strip_text: boo
         logger.error(f"Error saving file {os.path.basename(outname)}: {e}")
         return False
 
+def get_padding_info_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns padding info of a DataFrame
+
+    Args
+        df : the dataframe to unpad
+
+    Returns:
+        the unpadded DataFrame
+    
+
+    """
+    x, y = 0, 0
+    while df.iloc[x].isna().all():
+        x += 1
+    while df.iloc[:, y].isna().all():
+        y += 1
+    return x, y
+
+def unpad_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Unpads a DataFrame
+
+    Args
+        df : the dataframe to unpad
+
+    Returns:
+        the unpadded dataframe
+    
+
+    """
+    x, y = get_padding_info_df(df)
+    return df.iloc[x:, y:]
+
+def strip_text_df(df: pd.DataFrame) -> pd.DataFrame:
+    t = df.copy()
+    stripvalue = lambda x: x if not isinstance(x, str) else x.strip()
+    return t.map(stripvalue)
+
+def process_xls_file(filename: str, outname: str, unpad: bool, strip_text: bool) -> None:
+    if not os.path.exists(filename):
+        logger.error(f"File not found: {filename}")
+        return False
+        
+    logger.info(f"Processing: {os.path.basename(filename)} (Unpad: {unpad}, Strip: {strip_text})")
+    
+    try:
+        dfs = pd.read_excel(filename, sheet_name=None)
+    except Exception as e:
+        logger.error(f"Error loading file {filename}: {e}")
+        sh.copy(filename, outname) # Copy source to destination for safety
+        return False
+    for name, df in dfs.items():
+        if unpad:
+            df = unpad_df(df)
+        if strip_text:
+            df = strip_text_df(df)
+        dfs[name] = df
+    with pd.ExcelWriter(outname, engine='xlwt') as writer:
+        for name, df in dfs.items():
+            df.to_excel(writer, sheet_name=name, index=False)
+
+def process_csv_file(filename: str, outname: str, unpad: bool, strip_text: bool) -> None:
+    if not os.path.exists(filename):
+        logger.error(f"File not found: {filename}")
+        return False
+        
+    logger.info(f"Processing: {os.path.basename(filename)} (Unpad: {unpad}, Strip: {strip_text})")
+    
+    try:
+        df = pd.read_csv(filename)
+    except Exception as e:
+        logger.error(f"Error loading file {filename}: {e}")
+        sh.copy(filename, outname) # Copy source to destination for safety
+        return False
+    if unpad:
+        df = unpad_df(df)
+    if strip_text:
+        df = strip_text_df(df)
+    df.to_csv(outname, index=False)
 
 def process_folder(source_fol: str, dest_fol: str, unpad: bool, strip_text: bool):
     """Recursively processes all Excel files in a folder."""
@@ -294,25 +380,330 @@ def process_folder(source_fol: str, dest_fol: str, unpad: bool, strip_text: bool
             dest_path = os.path.join(destfol, file)
             
             if file.lower().endswith(".xlsx"):
-                # Process only Excel files
-                process_excel_file(source_path, dest_path, unpad, strip_text)
+                # Process Excel files
+                process_xlsx_file(source_path, dest_path, unpad, strip_text)
             else:
-                # Copy other files directly
-                try:
-                    sh.copy2(source_path, dest_path)
-                except Exception as e:
-                    logger.error(f"Error copying non-Excel file {file}: {e}")
+                if file.lower().endswith(".xls"):
+                    process_xls_file(source_path, dest_path, unpad, strip_text)
+                elif file.lower().endswith(".csv"):
+                    process_csv_file(source_path, dest_path, unpad, strip_text)
+                else:
+                    # Copy other files directly
+                    try:
+                        sh.copy2(source_path, dest_path)
+                    except Exception as e:
+                        logger.error(f"Error copying non-Excel file {file}: {e}")
+            
 
     logger.info(f"--- Folder Process Complete: {os.path.basename(dest_fol)} ---")
 
-
-# =============================================================================
-# Q2: Checking function (No changes needed here as it only reads/reports)
-# =============================================================================
-
-def check_excel_file(filename: str, check_padding: bool, check_strip: bool) -> Optional[Dict[str, Any]]:
+def read_table(file, frmt=None):
     """
-    Checks a single Excel file for padding and/or unstripped text.
+    Reads an Excel (xlsx/xls) or CSV file into a pandas DataFrame.
+    """
+    file_lower = file.lower()
+    if frmt is None:
+        if file_lower.endswith(".csv"):
+            frmt = "csv"
+        elif file_lower.endswith(".xlsx"):
+            frmt = "xlsx"
+        elif file_lower.endswith(".xls"): # Added XLS support
+            frmt = "xls"
+        else:
+            raise InvalidFileFormatError("Only csv, xlsx, and xls can be processed")
+    
+    # Determine the read function
+    if frmt == "csv":
+        read_func = pd.read_csv
+    elif frmt in ["xlsx", "xls"]:
+        read_func = pd.read_excel
+    else:
+         raise InvalidFileFormatError(f"Unsupported format for reading: {frmt}")
+
+    # Reads data. Pandas automatically handles duplicate column names (e.g., Col -> Col.1, Col.2)
+    # Use header=0 (first row) for initial read
+    df = read_func(file) 
+    
+    # Re-read the file to capture the actual first row as the list of column names
+    try:
+        # Set header=None and read only the first row
+        columns_df = read_func(file, nrows=1, header=None)
+        # Extract the original column names (potentially non-unique)
+        columns = columns_df.iloc[0].astype(str).tolist()
+    except Exception as e:
+        logger.warning(f"Could not read first row for original column names in {file}: {e}")
+        columns = df.columns.astype(str).tolist() # Fallback to pandas detected headers
+
+    return df, columns, frmt
+
+def check_for_multiple_tables(df, file):
+    """
+    Checks if a DataFrame contains multiple tables separated by fully empty columns (NaNs).
+    Returns True if multiple tables are found, False otherwise.
+    """
+    empty_cols = []
+    
+    for n, col in enumerate(df.columns):
+        # Check if the entire column consists of NaN values
+        if df[col].isna().all():
+            empty_cols.append(n)
+
+    if empty_cols:
+        logger.warning(f"Multiple tables issue in {file}: Columns at indices {empty_cols} are empty and suggest a table split.")
+        return True
+    return False
+
+def _safe_sheet_name(name: Any) -> str:
+    """Sanitizes a string to be a valid, truncated Excel sheet name."""
+    name_str = str(name)
+    # Invalid characters: \ / ? * [ ] : 
+    name_str = name_str.replace('[', '').replace(']', '').replace(':', '').replace('/', '').replace('\\', '').replace('?', '').replace('*', '').replace(' ', '_')
+    # Limit length to 31 characters
+    return name_str[:31]
+
+def _get_excel_writer_engine(out_format: str) -> str:
+    """Returns the correct Pandas ExcelWriter engine based on output format."""
+    if out_format == 'xlsx':
+        return 'xlsxwriter'
+    elif out_format == 'xls':
+        # Requires the 'xlwt' library
+        return 'xlwt'
+    else:
+        raise InvalidFileFormatError(f"Unsupported Excel format for writing: {out_format}")
+
+def split_tables(file, in_format=None, out_format=None, inplace=False, destination=None):
+    """
+    Splits a file containing multiple tables separated by empty columns into 
+    individual sheets (if XLSX/XLS) or separate CSV files.
+    """
+    try:
+        df, original_columns, in_format = read_table(file, frmt=in_format)
+    except InvalidFileFormatError as e:
+        logger.error(f"Skipping split for {file}: {e}")
+        return
+
+    start = 0
+    tables: Dict[str, pd.DataFrame] = {}
+    
+    # 1. Identify table boundaries (columns that are all NaN)
+    empty_cols_indices = [n for n, col in enumerate(df.columns) if df[col].isna().all()]
+    table_boundaries = empty_cols_indices + [len(df.columns)]
+    
+    # 2. Extract tables
+    for block_end in table_boundaries:
+        end = block_end
+        if end > start:  # Extract table if block is not empty
+            table = df.iloc[:, start:end].copy()
+            
+            # Use the original (potentially non-unique) column names for headers
+            table.columns = original_columns[start:end]
+            
+            # Use the unique Pandas-generated column name of the first column 
+            # as the key for the sheet/file name.
+            key = df.columns[start] if pd.notna(df.columns[start]) else f"Table_{start}"
+            tables[key] = table
+        start = block_end + 1
+    
+    if not tables:
+        logger.info(f"No tables found in {file} to split.")
+        return
+
+    # 3. Handle Output Path
+    out_format = in_format if out_format is None else out_format
+    basename = os.path.splitext(file)[0]
+    
+    if out_format in ['xlsx', 'xls']:
+        if destination:
+            outfile = destination
+        elif inplace:
+            outfile = file
+        else:
+            outfile = f"{basename}_split.{out_format}"
+        
+        # Ensure the output directory exists
+        os.makedirs(os.path.dirname(outfile) or '.', exist_ok=True)
+        
+        # Ensure the filename is not too long
+        if len(outfile) > 218: 
+             logger.warning(f"Output filename {outfile} is too long, truncating.")
+             outfile = f"{basename[:210]}_split.{out_format}"
+
+        # 4. Write Output (XLSX/XLS)
+        try:
+            engine = _get_excel_writer_engine(out_format)
+            with pd.ExcelWriter(outfile, engine=engine) as writer:
+                for k, table in tables.items():
+                    sheet_name = _safe_sheet_name(k)
+                    table.to_excel(writer, sheet_name=sheet_name, index=False, header=True)
+            logger.info(f"Successfully split tables from {file} to {out_format} sheets in {outfile}")
+        except Exception as e:
+            logger.error(f"Error writing {out_format} output for {file}: {e}")
+
+    elif out_format == "csv":
+        # Write each table to a separate CSV file in a new directory
+        output_dir = os.path.splitext(file)[0] + "_split_csv" if destination is None else destination
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for k, table in tables.items():
+            safe_k = _safe_sheet_name(k).lower()
+            outfile = os.path.join(output_dir, f"{safe_k}.csv")
+            table.to_csv(outfile, index=False, header=True)
+        logger.info(f"Successfully split tables from {file} into multiple CSV files in directory: {output_dir}")
+    else:
+        logger.error(f"Unsupported output format: {out_format}")
+
+
+def split_into_two_colum_tables(file, in_format=None, out_format=None, inplace=False, destination=None):
+    """
+    Splits a file containing multiple tables into two-column (X, Y) pairs.
+    """
+    try:
+        df, original_columns, in_format = read_table(file, frmt=in_format)
+    except InvalidFileFormatError as e:
+        logger.error(f"Skipping 2-column split for {file}: {e}")
+        return
+
+    tables: Dict[str, pd.DataFrame] = {}
+    
+    # 1. Identify table boundaries (columns that are all NaN)
+    empty_cols_indices = [n for n, col in enumerate(df.columns) if df[col].isna().all()]
+    
+    # Define block start and end indices
+    block_starts = [0] + [i + 1 for i in empty_cols_indices]
+    block_ends = empty_cols_indices + [len(df.columns)]
+    
+    # Filter for valid blocks (start < end)
+    blocks: List[Tuple[int, int]] = [(s, e) for s, e in zip(block_starts, block_ends) if s < e]
+
+    # 2. Extract tables in (X, Y) pairs
+    for start, end in blocks:
+        block_df = df.iloc[:, start:end]
+        
+        # The first column of the block is the X-axis (start).
+        if block_df.shape[1] > 1:
+            x_col_index = start
+            x_col_name_original = original_columns[x_col_index]
+            
+            # Create (X, Y) pairs for all Y columns in this block
+            for y_index_in_block in range(1, block_df.shape[1]):
+                y_col_index = start + y_index_in_block
+                
+                y_col_name_original = original_columns[y_col_index] 
+                y_col_name_unique = df.columns[y_col_index] # Unique Pandas name for key
+                
+                # Create the two-column table
+                table = df.iloc[:, [x_col_index, y_col_index]].copy()
+                
+                # Use original column names for the headers
+                table.columns = [x_col_name_original, y_col_name_original]
+                
+                # Use the unique Pandas Y column name as the key
+                key = y_col_name_unique
+                tables[key] = table
+
+    if not tables:
+        logger.info(f"No two-column tables found in {file} to split.")
+        return
+
+    # 3. Handle Output Path
+    out_format = in_format if out_format is None else out_format
+    basename = os.path.splitext(file)[0]
+    
+    if out_format in ['xlsx', 'xls']:
+        if destination:
+            outfile = destination
+        elif inplace:
+            outfile = file
+        else:
+            outfile = f"{basename}_2col_split.{out_format}"
+            
+        os.makedirs(os.path.dirname(outfile) or '.', exist_ok=True)
+        
+        if len(outfile) > 218: 
+             logger.warning(f"Output filename {outfile} is too long, truncating.")
+             outfile = f"{basename[:210]}_2col_split.{out_format}"
+
+        # 4. Write Output (XLSX/XLS)
+        try:
+            engine = _get_excel_writer_engine(out_format)
+            with pd.ExcelWriter(outfile, engine=engine) as writer:
+                for k, table in tables.items():
+                    # k is the unique Pandas name (e.g., 'Y.1')
+                    sheet_name = _safe_sheet_name(k)
+                    table.to_excel(writer, sheet_name=sheet_name, index=False, header=True)
+            logger.info(f"Successfully split into two-column tables from {file} to {out_format} sheets in {outfile}")
+        except Exception as e:
+            logger.error(f"Error writing {out_format} output for {file}: {e}")
+
+    elif out_format == "csv":
+        # Write each table to a separate CSV file in a new directory
+        output_dir = os.path.splitext(file)[0] + "_2col_split_csv" if destination is None else destination
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for k, table in tables.items():
+            safe_k = _safe_sheet_name(k).lower()
+            outfile = os.path.join(output_dir, f"{safe_k}.csv")
+            table.to_csv(outfile, index=False, header=True)
+        logger.info(f"Successfully split tables from {file} into multiple 2-column CSV files in directory: {output_dir}")
+    else:
+        logger.error(f"Unsupported output format: {out_format}")
+
+
+
+# =============================================================================
+# Checking function 
+# =============================================================================
+
+def check_xls_file(filename: str, check_padding: bool, check_strip: bool) -> Optional[Dict[str, Any]]:
+    """
+    Checks a single .xls file for padding and/or unstripped text.
+    
+    Returns:
+        A dictionary of issues found, or None if no issues found or file is not Excel/error occurred.
+    """
+    if not filename.lower().endswith(".xlsx"):
+        return None
+        
+    try:
+        dfs = pd.read_excel(filename, sheet_name=None)
+    except Exception:
+        logger.error(f"Could not load file {filename}. Skipping check.")
+        return None
+        
+    issues = {'padding_found': False, 'strip_issues': False, 'details': {}}
+    
+    for name, df in dfs.items():
+        sheet_issues = {'padding': (0, 0), 'strip_cells': []}
+        
+        # 1. Check Padding
+        if check_padding:
+            rows_to_delete, cols_to_delete = get_padding_info_df(df)
+            if rows_to_delete > 0 or cols_to_delete > 0:
+                issues['padding_found'] = True
+                sheet_issues['padding'] = (rows_to_delete, cols_to_delete)
+        
+        # 2. Check Text Stripping
+        if check_strip:
+            # We only need to check the remaining cells (i.e., skipping any padded area)
+            start_row = sheet_issues['padding'][0] + 1
+            start_col = sheet_issues['padding'][1] + 1
+            
+            for n, row in df.iloc[start_row:, start_col:].iter_rows():
+                for m, cell in enumerate(row):
+                    # Check for text (data_type 's') that starts or ends with space
+                    if isinstance(cell, str):
+                        if cell.value.startswith(' ') or cell.value.endswith(' '):
+                            issues['strip_issues'] = True
+                            sheet_issues['strip_cells'].append([n + start_row, m + start_col])
+            
+        if issues['padding_found'] or issues['strip_issues']:
+            issues['details'][name] = sheet_issues
+            
+    return issues if issues['padding_found'] or issues['strip_issues'] else None
+
+def check_xlsx_file(filename: str, check_padding: bool, check_strip: bool) -> Optional[Dict[str, Any]]:
+    """
+    Checks a single .xlsx file for padding and/or unstripped text.
     
     Returns:
         A dictionary of issues found, or None if no issues found or file is not Excel/error occurred.
@@ -323,7 +714,7 @@ def check_excel_file(filename: str, check_padding: bool, check_strip: bool) -> O
     try:
         wb = load_workbook(filename)
     except Exception:
-        logger.error(f"Could not load file {os.path.basename(filename)}. Skipping check.")
+        logger.error(f"Could not load file {filename}. Skipping check.")
         return None
         
     issues = {'padding_found': False, 'strip_issues': False, 'details': {}}
@@ -332,14 +723,14 @@ def check_excel_file(filename: str, check_padding: bool, check_strip: bool) -> O
         ws = wb[sheet_name]
         sheet_issues = {'padding': (0, 0), 'strip_cells': []}
         
-        # 1. Check Padding (Q2 requirement 1)
+        # 1. Check Padding 
         if check_padding:
             rows_to_delete, cols_to_delete = get_padding_info(ws)
             if rows_to_delete > 0 or cols_to_delete > 0:
                 issues['padding_found'] = True
                 sheet_issues['padding'] = (rows_to_delete, cols_to_delete)
         
-        # 2. Check Text Stripping (Q2 requirement 2)
+        # 2. Check Text Stripping 
         if check_strip:
             # We only need to check the remaining cells (i.e., skipping any padded area)
             start_row = sheet_issues['padding'][0] + 1
@@ -358,6 +749,47 @@ def check_excel_file(filename: str, check_padding: bool, check_strip: bool) -> O
             
     return issues if issues['padding_found'] or issues['strip_issues'] else None
 
+def check_csv_file(filename: str, check_padding: bool, check_strip: bool) -> Optional[Dict[str, Any]]:
+    """
+    Checks a single csv file for padding and/or unstripped text.
+    
+    Returns:
+        A dictionary of issues found, or None if no issues found or file is not Excel/error occurred.
+    """
+    if not filename.lower().endswith(".csv"):
+        return None
+        
+    try:
+        df = pd.read_csv(filename)
+    except Exception:
+        logger.error(f"Could not load file {filename}. Skipping check.")
+        return None
+        
+    issues = {'padding_found': False, 'strip_issues': False, 'details': {"only_sheet": {'padding': (0, 0), 'strip_cells': []}}}
+    
+    # 1. Check Padding
+    if check_padding:
+        rows_to_delete, cols_to_delete = get_padding_info_df(df)
+        if rows_to_delete > 0 or cols_to_delete > 0:
+            issues['padding_found'] = True
+            issues["details"]["only_sheet"]['padding'] = (rows_to_delete, cols_to_delete)
+    
+    # 2. Check Text Stripping
+    if check_strip:
+        # We only need to check the remaining cells (i.e., skipping any padded area)
+        start_row = issues["details"]["only_sheet"]['padding'][0] + 1
+        start_col = issues["details"]["only_sheet"]['padding'][1] + 1
+        
+        for n, row in df.iloc[start_row:, start_col:].iterrows():
+            for m, cell in enumerate(row):
+                # Check for text (data_type 's') that starts or ends with space
+                if isinstance(cell, str):
+                    if cell.value.startswith(' ') or cell.value.endswith(' '):
+                        issues['strip_issues'] = True
+                        issues["details"]["only_sheet"]['strip_cells'].append([n + start_row, m + start_col])
+        
+    return issues if issues['padding_found'] or issues['strip_issues'] else None
+
 
 def check_folder_recursively(folder_path: str, check_padding: bool, check_strip: bool):
     """
@@ -373,31 +805,37 @@ def check_folder_recursively(folder_path: str, check_padding: bool, check_strip:
     
     for fol, _, files in os.walk(folder_path):
         for file in files:
+            logger.debug(file)
             full_path = os.path.join(fol, file)
             
-            if file.lower().endswith(".xlsx"):
-                issues = check_excel_file(full_path, check_padding, check_strip)
+            if file.lower().endswith(".csv"):
+                issues = check_csv_file(full_path, check_padding, check_strip)
+            elif file.lower().endswith(".xlsx"):
+                issues = check_xlsx_file(full_path, check_padding, check_strip)
+            elif file.lower().endswith(".xls"):
+                issues = check_xls_file(full_path, check_padding, check_strip)
+            else:
+                issues = False
+            if issues:
+                found_issues = True
+                relative_path = os.path.relpath(full_path, folder_path)
+                logger.warning(f"\n[ISSUE FOUND]: {relative_path}")
                 
-                if issues:
-                    found_issues = True
-                    relative_path = os.path.relpath(full_path, folder_path)
-                    logger.warning(f"\n[ISSUE FOUND]: {relative_path}")
-                    
-                    if issues['padding_found']:
-                        logger.warning("  * Padding Found (Run 'unpad' or 'clean' to fix):")
-                        for sheet, detail in issues['details'].items():
-                            if detail['padding'][0] > 0 or detail['padding'][1] > 0:
-                                logger.warning(f"    - Sheet '{sheet}': {detail['padding'][0]} row(s), {detail['padding'][1]} col(s)")
-                                
-                    if issues['strip_issues']:
-                        logger.warning("  * Unstripped Text Found (Run 'strip-text' or 'clean' to fix):")
-                        for sheet, detail in issues['details'].items():
-                            if detail['strip_cells']:
-                                # Only show the first few cells to keep the output clean
-                                coords = detail['strip_cells'][:5]
-                                more = f"... (+{len(detail['strip_cells']) - 5} more)" if len(detail['strip_cells']) > 5 else ""
-                                logger.warning(f"    - Sheet '{sheet}': e.g., {', '.join(coords)}{more}")
-                                
+                if issues['padding_found']:
+                    logger.warning("  * Padding Found (Run 'unpad' or 'clean' to fix):")
+                    for sheet, detail in issues['details'].items():
+                        if detail['padding'][0] > 0 or detail['padding'][1] > 0:
+                            logger.warning(f"    - Sheet '{sheet}': {detail['padding'][0]} row(s), {detail['padding'][1]} col(s)")
+                            
+                if issues['strip_issues']:
+                    logger.warning("  * Unstripped Text Found (Run 'strip-text' or 'clean' to fix):")
+                    for sheet, detail in issues['details'].items():
+                        if detail['strip_cells']:
+                            # Only show the first few cells to keep the output clean
+                            coords = detail['strip_cells'][:5]
+                            more = f"... (+{len(detail['strip_cells']) - 5} more)" if len(detail['strip_cells']) > 5 else ""
+                            logger.warning(f"    - Sheet '{sheet}': e.g., {', '.join(coords)}{more}")
+                logger.debug("done")
 
     if not found_issues:
         logger.info("\n--- Check Complete: No issues found in any Excel file. ---")
@@ -406,20 +844,21 @@ def check_folder_recursively(folder_path: str, check_padding: bool, check_strip:
 
 
 # =============================================================================
-# CLI Implementation (No changes needed here)
+# CLI Implementation
 # =============================================================================
 
 def handle_process_command(args, unpad: bool, strip_text: bool):
     """
     Handler function for 'unpad', 'strip-text', and 'clean' commands.
     """
+    logger.info(args)
     if not os.path.exists(args.source):
         logger.error(f"Source path not found: {args.source}")
         return
 
     if os.path.isdir(args.source):
         # Handle folder processing
-        dest = args.destination if args.destination else args.source + "_processed"
+        dest = args.destination if args.destination else args.source + "_processed" 
         process_folder(args.source, dest, unpad, strip_text)
     
     elif os.path.isfile(args.source):
@@ -429,7 +868,7 @@ def handle_process_command(args, unpad: bool, strip_text: bool):
             return
             
         dest = args.destination if args.destination else args.source.replace(".xlsx", "_processed.xlsx")
-        process_excel_file(args.source, dest, unpad, strip_text)
+        process_xlsx_file(args.source, dest, unpad, strip_text)
         
     else:
         logger.error("Source must be a valid file or directory.")

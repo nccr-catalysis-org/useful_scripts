@@ -8,16 +8,98 @@ If you are not familiar with Python, just make sure to have a Python3 installati
 
 For any feedback, to report a bug, or to request a feature, contact: [admin@nccr-catalysis.ch](mailto:admin@nccr-catalysis.ch)
 
-# Installation
+1\. Installation Guide for Beginners
+------------------------------------
 
-```
-# 1. Clone your repo
-git clone https://github.com/YourUsername/useful_scripts.git
-cd useful_scripts
+To install and use these scripts, you only need two prerequisites: **Python** and **Git**. You **do not** need a GitHub account, as this repository is public.
 
-# 2. Install the package in "editable" mode for development (best practice)
-pip install -e .
-```
+### Step 1: Install Python (and Pip)
+
+Python 3 is required. The installation process for Python typically includes **Pip** (the package installer), which we will use to install the scripts.
+
+| **Operating System** | **How to Install Python** |
+| --- | --- |
+|   **Windows**   |   1\. Go to the [Official Python Website](https://www.python.org/downloads/windows/ "null").      2\. Download the latest Python 3 installer.      3\. **CRUCIAL STEP:** During installation, make sure to check the box that says **"Add Python to PATH"** before clicking "Install Now."   |
+|   **macOS**   |   1\. Go to the [Official Python Website](https://www.python.org/downloads/macos/ "null").      2\. Download the latest Python 3 installer.      3\. Run the installer package.   |
+|   **Linux (Ubuntu/Debian)**   |   Most distributions come with Python pre-installed. You can ensure you have Python 3 and Pip by running the following commands in your terminal:      `sudo apt update`      `sudo apt install python3 python3-pip`   |
+
+**Verification:** Open your command line (Terminal on Mac/Linux, Command Prompt/PowerShell on Windows) and type:
+
+    python3 --version
+    # You should see something like: Python 3.10.12
+    
+### Step 2: Install Git
+
+Git is required to download (clone) the code from GitHub to your local machine.
+
+| **Operating System** | **How to Install Git** |
+| --- | --- |
+|   **Windows**   |   1\. Go to the [Git website](https://git-scm.com/download/win "null").      2\. Download and run the installer.      3\. Accept all default settings during installation.   |
+|   **macOS**   |   The easiest way is to install Apple's Command Line Tools by running:      `xcode-select --install`      Alternatively, you can install Git via [Homebrew](https://brew.sh/ "null").   |
+|   **Linux (Ubuntu/Debian)**   |   Run the following command in your terminal:      `sudo apt install git`   |
+
+**Verification:** Open your command line and type:
+
+    git --version
+    # You should see something like: git version 2.34.1
+    
+
+### Step 3: Install the Scripts
+
+Once Python and Git are ready, follow these steps to install the `nccr_cat_scripts` package:
+1.  **Get a terminal in a folder of your choosing:**
+Use one of these possible methods:
+    1. Use your file system to navigate to the desired folder and then open a terminal there:
+        1. right click on the empty space in the folder or on a folder itself, then for  click on "Open PowerShell window here"/"Open command window here"/"Open Terminal Here"/"Open in Terminal" according to your OS
+        2. otherwise on Mac control-click (or right-click) the folder name/icon in the Path Bar at the bottom of the window, then choose "Open in Terminal"
+    2. Open a terminal and navigate to the folder using the following commands:
+        1. To Change Directory to a folder: Use `cd <folder_name>`.
+        2. To Move Up one directory: Use `cd ..`.
+        3. To See your Current Location: Use `pwd` (Linux/Mac) or `cd` (Windows).
+        4. To List files in the current directory: Use `ls` (Linux/Mac) or `dir` (Windows).
+
+2.  **Clone the Repository (Download the code):** This command downloads all the files from GitHub into a folder called nccr_cat_scripts which is placed within the folder you are in now.
+    
+        git clone https://github.com/nccr_cat_scripts/nccr_cat_scripts.git
+        
+    
+3.  **Navigate to the Directory:** Change into the newly created project folder.
+    
+        cd nccr_cat_scripts
+        
+    
+4.  **Install the Package:** Use the primary `pip` command, or the Windows workaround if needed. This installs the module in "editable" mode (`-e`).
+    
+        pip install -e .
+    
+### **Troubleshooting: 'pip' command not found (Windows)**
+
+If the installation step "Add Python to PATH" was missed on Windows, the system won't recognize the `pip` command.
+
+Solution 1: Use py -m prefix (Recommended)
+
+Instead of typing pip install -e ., you can tell the Python launcher utility (py) to run the Pip module:
+
+    py -m pip install -e .
+    
+
+Solution 2: Manually Add Python to PATH
+
+If Solution 1 fails, you need to manually add the Python installation directories to your system's PATH.
+
+1.  **Locate Folders:** Find the two folders in your Python installation (example paths shown):
+    
+    *   The main Python folder: `C:\Users\YourUser\AppData\Local\Programs\Python\Python310`
+        
+    *   The Scripts folder: `C:\Users\YourUser\AppData\Local\Programs\Python\Python310\Scripts`
+        
+2.  **Open Environment Variables:** Press the **Windows Key** and type `environment variables`. Click **"Edit the system environment variables"**, then click the **"Environment Variables..."** button.
+    
+3.  **Edit PATH:** Under "System variables," select **`Path`** and click **"Edit..."**.
+    
+4.  **Add New Paths:** Click **"New"** and add the main Python folder path. Click **"New"** again and add the `Scripts` folder path.
+    
+5.  **Restart Terminal:** Close and reopen your terminal window for the changes to take effect. You should now be able to run `pip install -e .`.
 # Importing
 To use the functions in your own scripts, import as follows:
 
