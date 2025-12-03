@@ -47,18 +47,28 @@ Git is required to download (clone) the code from GitHub to your local machine.
 ### Step 3: Install the Scripts
 
 Once Python and Git are ready, follow these steps to install the `nccr_cat_scripts` package:
+1.  **Get a terminal in a folder of your choosing:**
+Use one of these possible methods:
+    1. Use your file system to navigate to the desired folder and then open a terminal there:
+        1. right click on the empty space in the folder or on a folder itself, then for  click on "Open PowerShell window here"/"Open command window here"/"Open Terminal Here"/"Open in Terminal" according to your OS
+        2. otherwise on Mac control-click (or right-click) the folder name/icon in the Path Bar at the bottom of the window, then choose "Open in Terminal"
+    2. Open a terminal and navigate to the folder using the following commands:
+        1. To Change Directory to a folder: Use `cd <folder_name>`.
+        2. To Move Up one directory: Use `cd ..`.
+        3. To See your Current Location: Use `pwd` (Linux/Mac) or `cd` (Windows).
+        4. To List files in the current directory: Use `ls` (Linux/Mac) or `dir` (Windows).
 
-1.  **Clone the Repository (Download the code):** This command downloads all the files from GitHub.
+2.  **Clone the Repository (Download the code):** This command downloads all the files from GitHub into a folder called nccr_cat_scripts which is placed within the folder you are in now.
     
         git clone https://github.com/nccr_cat_scripts/nccr_cat_scripts.git
         
     
-2.  **Navigate to the Directory:** Change into the newly created project folder.
+3.  **Navigate to the Directory:** Change into the newly created project folder.
     
         cd nccr_cat_scripts
         
     
-3.  **Install the Package:** Use the primary `pip` command, or the Windows workaround if needed. This installs the module in "editable" mode (`-e`).
+4.  **Install the Package:** Use the primary `pip` command, or the Windows workaround if needed. This installs the module in "editable" mode (`-e`).
     
         pip install -e .
     
