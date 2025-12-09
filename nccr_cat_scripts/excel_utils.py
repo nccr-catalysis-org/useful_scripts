@@ -190,7 +190,7 @@ def process_xlsx_file(filename: str, outname: str, unpad: bool, strip_text: bool
     try:
         wb = load_workbook(filename)
     except Exception as e:
-        logger.error(f"Error loading workbook {os.path.basename(filename)}: {e}")
+        logger.error(f"Error loading workbook {filename}: {e}")
         sh.copy(filename, outname) # Copy source to destination for safety
         return False
 
@@ -324,7 +324,7 @@ def process_xls_file(filename: str, outname: str, unpad: bool, strip_text: bool)
     try:
         dfs = pd.read_excel(filename, sheet_name=None)
     except Exception as e:
-        logger.error(f"Error loading file {os.path.basename(filename)}: {e}")
+        logger.error(f"Error loading file {filename}: {e}")
         sh.copy(filename, outname) # Copy source to destination for safety
         return False
     for name, df in dfs.items():
@@ -347,14 +347,14 @@ def process_csv_file(filename: str, outname: str, unpad: bool, strip_text: bool)
     try:
         df = pd.read_csv(filename)
     except Exception as e:
-        logger.error(f"Error loading file {os.path.basename(filename)}: {e}")
+        logger.error(f"Error loading file {filename}: {e}")
         sh.copy(filename, outname) # Copy source to destination for safety
         return False
     if unpad:
         df = unpad_df(df)
     if strip_text:
         df = strip_text_df(df)
-    df.to_csv(outname)
+    df.to_csv(outname, index=False)
 
 def process_folder(source_fol: str, dest_fol: str, unpad: bool, strip_text: bool):
     """Recursively processes all Excel files in a folder."""
@@ -667,7 +667,7 @@ def check_xls_file(filename: str, check_padding: bool, check_strip: bool) -> Opt
     try:
         dfs = pd.read_excel(filename, sheet_name=None)
     except Exception:
-        logger.error(f"Could not load file {os.path.basename(filename)}. Skipping check.")
+        logger.error(f"Could not load file {filename}. Skipping check.")
         return None
         
     issues = {'padding_found': False, 'strip_issues': False, 'details': {}}
@@ -714,7 +714,7 @@ def check_xlsx_file(filename: str, check_padding: bool, check_strip: bool) -> Op
     try:
         wb = load_workbook(filename)
     except Exception:
-        logger.error(f"Could not load file {os.path.basename(filename)}. Skipping check.")
+        logger.error(f"Could not load file {filename}. Skipping check.")
         return None
         
     issues = {'padding_found': False, 'strip_issues': False, 'details': {}}
@@ -762,7 +762,7 @@ def check_csv_file(filename: str, check_padding: bool, check_strip: bool) -> Opt
     try:
         df = pd.read_csv(filename)
     except Exception:
-        logger.error(f"Could not load file {os.path.basename(filename)}. Skipping check.")
+        logger.error(f"Could not load file {filename}. Skipping check.")
         return None
         
     issues = {'padding_found': False, 'strip_issues': False, 'details': {"only_sheet": {'padding': (0, 0), 'strip_cells': []}}}
@@ -777,10 +777,10 @@ def check_csv_file(filename: str, check_padding: bool, check_strip: bool) -> Opt
     # 2. Check Text Stripping
     if check_strip:
         # We only need to check the remaining cells (i.e., skipping any padded area)
-        start_row = issues['padding'][0] + 1
-        start_col = issues['padding'][1] + 1
+        start_row = issues["details"]["only_sheet"]['padding'][0] + 1
+        start_col = issues["details"]["only_sheet"]['padding'][1] + 1
         
-        for n, row in df.iloc[start_row:, start_col:].iter_rows():
+        for n, row in df.iloc[start_row:, start_col:].iterrows():
             for m, cell in enumerate(row):
                 # Check for text (data_type 's') that starts or ends with space
                 if isinstance(cell, str):
@@ -805,6 +805,7 @@ def check_folder_recursively(folder_path: str, check_padding: bool, check_strip:
     
     for fol, _, files in os.walk(folder_path):
         for file in files:
+            logger.debug(file)
             full_path = os.path.join(fol, file)
             
             if file.lower().endswith(".csv"):
@@ -813,7 +814,8 @@ def check_folder_recursively(folder_path: str, check_padding: bool, check_strip:
                 issues = check_xlsx_file(full_path, check_padding, check_strip)
             elif file.lower().endswith(".xls"):
                 issues = check_xls_file(full_path, check_padding, check_strip)
-                
+            else:
+                issues = False
             if issues:
                 found_issues = True
                 relative_path = os.path.relpath(full_path, folder_path)
@@ -833,6 +835,7 @@ def check_folder_recursively(folder_path: str, check_padding: bool, check_strip:
                             coords = detail['strip_cells'][:5]
                             more = f"... (+{len(detail['strip_cells']) - 5} more)" if len(detail['strip_cells']) > 5 else ""
                             logger.warning(f"    - Sheet '{sheet}': e.g., {', '.join(coords)}{more}")
+                logger.debug("done")
 
     if not found_issues:
         logger.info("\n--- Check Complete: No issues found in any Excel file. ---")
@@ -848,13 +851,14 @@ def handle_process_command(args, unpad: bool, strip_text: bool):
     """
     Handler function for 'unpad', 'strip-text', and 'clean' commands.
     """
+    logger.info(args)
     if not os.path.exists(args.source):
         logger.error(f"Source path not found: {args.source}")
         return
 
     if os.path.isdir(args.source):
         # Handle folder processing
-        dest = args.destination if args.destination else args.source + "_processed"
+        dest = args.destination if args.destination else args.source + "_processed" 
         process_folder(args.source, dest, unpad, strip_text)
     
     elif os.path.isfile(args.source):
@@ -904,7 +908,7 @@ def cli():
         help='Path to the source .xlsx file OR directory to process.'
     )
     process_parser.add_argument(
-        'dest',
+        'destination',
         type=str,
         default=None,
         help='Optional path for the output file or directory. If a file is given, defaults to <file>_processed.xlsx. If a folder is given, defaults to <folder>_processed.'
