@@ -397,7 +397,7 @@ def process_folder(source_fol: str, dest_fol: str, unpad: bool, strip_text: bool
 
     logger.info(f"--- Folder Process Complete: {os.path.basename(dest_fol)} ---")
 
-def read_table(file, frmt=None):
+def read_sheets(file, frmt=None):
     """
     Reads an Excel (xlsx/xls) or CSV file into a pandas DataFrame.
     """
@@ -414,27 +414,32 @@ def read_table(file, frmt=None):
     
     # Determine the read function
     if frmt == "csv":
-        read_func = pd.read_csv
+        # Read csv
+        sheets = {"csv_only_sheet": {"df": pd.read_csv(file)}}
+        # Re-read the file to capture the actual first row as the list of column names
+        try:
+            # Set header=None and read only the first row
+            columns_df = pd.read_csv(file, nrows=1, header=None)
+            # Extract the original column names (potentially non-unique)
+            sheets["csv_only_sheet"]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
+        except Exception as e:
+            logger.warning(f"Could not read first row for original column names in {file}: {e}")
+            sheets["csv_only_sheet"]["columns"] = sheets["csv_only_sheet"]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
     elif frmt in ["xlsx", "xls"]:
-        read_func = pd.read_excel
+        sheets = {k: {"df": v} for k, v in pd.read_excel(file, sheet_name=None).items()}
+        for sheet_name, dict_ in sheets.items():
+            try:
+                # Set header=None and read only the first row
+                columns_df = pd.read_excel(file, nrows=1, header=None, sheet_name=sheet_name)
+                # Extract the original column names (potentially non-unique)
+                sheets[sheet_name]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
+            except Exception as e:
+                logger.warning(f"Could not read first row for original column names in {file}: {e}")
+                sheets[sheet_name]["columns"] = sheets[sheet_name]["table"].columns.astype(str).tolist() # Fallback to pandas detected headers
     else:
          raise InvalidFileFormatError(f"Unsupported format for reading: {frmt}")
 
-    # Reads data. Pandas automatically handles duplicate column names (e.g., Col -> Col.1, Col.2)
-    # Use header=0 (first row) for initial read
-    df = read_func(file) 
-    
-    # Re-read the file to capture the actual first row as the list of column names
-    try:
-        # Set header=None and read only the first row
-        columns_df = read_func(file, nrows=1, header=None)
-        # Extract the original column names (potentially non-unique)
-        columns = columns_df.iloc[0].astype(str).tolist()
-    except Exception as e:
-        logger.warning(f"Could not read first row for original column names in {file}: {e}")
-        columns = df.columns.astype(str).tolist() # Fallback to pandas detected headers
-
-    return df, columns, frmt
+    return sheets, frmt
 
 def check_for_multiple_tables(df, file):
     """
@@ -477,36 +482,42 @@ def split_tables(file, in_format=None, out_format=None, inplace=False, destinati
     individual sheets (if XLSX/XLS) or separate CSV files.
     """
     try:
-        df, original_columns, in_format = read_table(file, frmt=in_format)
+        sheets, in_format = read_sheets(file, frmt=in_format)
     except InvalidFileFormatError as e:
         logger.error(f"Skipping split for {file}: {e}")
         return
-
-    start = 0
-    tables: Dict[str, pd.DataFrame] = {}
     
-    # 1. Identify table boundaries (columns that are all NaN)
-    empty_cols_indices = [n for n, col in enumerate(df.columns) if df[col].isna().all()]
-    table_boundaries = empty_cols_indices + [len(df.columns)]
-    
-    # 2. Extract tables
-    for block_end in table_boundaries:
-        end = block_end
-        if end > start:  # Extract table if block is not empty
-            table = df.iloc[:, start:end].copy()
-            
-            # Use the original (potentially non-unique) column names for headers
-            table.columns = original_columns[start:end]
-            
-            # Use the unique Pandas-generated column name of the first column 
-            # as the key for the sheet/file name.
-            key = df.columns[start] if pd.notna(df.columns[start]) else f"Table_{start}"
-            tables[key] = table
-        start = block_end + 1
-    
-    if not tables:
-        logger.info(f"No tables found in {file} to split.")
-        return
+    tables_per_sheet = {}
+    for sheet_name, data in sheets.items():
+        df, original_columns = data["df"], data["columns"]
+        start = 0
+        tables: Dict[str, pd.DataFrame] = {}
+        
+        # 1. Identify table boundaries (columns that are all NaN)
+        empty_cols_indices = [n for n, col in enumerate(df.columns) if df[col].isna().all()]
+        table_boundaries = empty_cols_indices + [len(df.columns)]
+        
+        # 2. Extract tables
+        for n, block_end in enumerate(table_boundaries):
+            end = block_end
+            if end > start:  # Extract table if block is not empty
+                table = df.iloc[:, start:end].copy()
+                if not any(original_columns[start:end]):
+                    table = table.iloc[1:].reset_index(drop=True)
+                    key = start
+                elif original_columns[start] and not any(original_columns[start+1:end]):  # table title only
+                    key = df.columns[start]
+                    table.columns = table.iloc[0].tolist()
+                    table = table.iloc[1:].reset_index(drop=True)  # perhaps redundant as we do not write index, but still cleaner in case of future development
+                else:
+                    table.columns = original_columns[start:end]
+                    key = start
+                tables[key] = table
+            start = block_end + 1
+        if not tables:
+            logger.info(f"No tables found in sheet {sheet_name} in {file} to split.")
+            tables_per_sheet[sheet_name] = {sheet_name: df}
+        tables_per_sheet[sheet_name] = tables
 
     # 3. Handle Output Path
     out_format = in_format if out_format is None else out_format
@@ -532,23 +543,21 @@ def split_tables(file, in_format=None, out_format=None, inplace=False, destinati
         try:
             engine = _get_excel_writer_engine(out_format)
             with pd.ExcelWriter(outfile, engine=engine) as writer:
-                for k, table in tables.items():
-                    sheet_name = _safe_sheet_name(k)
-                    table.to_excel(writer, sheet_name=sheet_name, index=False, header=True)
+                for sheet_name, tables in tables_per_sheet.items():
+                    for k, table in tables.items():
+                        new_sheet_name = _safe_sheet_name(f"{sheet_name}_{k}")
+                        table.to_excel(writer, sheet_name=new_sheet_name, index=False, header=True)
             logger.info(f"Successfully split tables from {file} to {out_format} sheets in {outfile}")
         except Exception as e:
             logger.error(f"Error writing {out_format} output for {file}: {e}")
 
     elif out_format == "csv":
-        # Write each table to a separate CSV file in a new directory
-        output_dir = os.path.splitext(file)[0] + "_split_csv" if destination is None else destination
-        os.makedirs(output_dir, exist_ok=True)
-        
-        for k, table in tables.items():
-            safe_k = _safe_sheet_name(k).lower()
-            outfile = os.path.join(output_dir, f"{safe_k}.csv")
+        # Write each table to a separate CSV file
+        for k, table in tables_per_sheet["csv_only_sheet"].items():
+            safe_k = _safe_sheet_name(k)
+            outfile = os.path.join(f"{basename}_split_{safe_k}.csv")
             table.to_csv(outfile, index=False, header=True)
-        logger.info(f"Successfully split tables from {file} into multiple CSV files in directory: {output_dir}")
+        logger.info(f"Successfully split tables from {file} into multiple CSV")
     else:
         logger.error(f"Unsupported output format: {out_format}")
 
