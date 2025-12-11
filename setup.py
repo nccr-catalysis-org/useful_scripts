@@ -36,7 +36,7 @@ setup(
     entry_points={
         'console_scripts': [
             'zip-utils = nccr_cat_scripts.zip_utils:cli',
-            'excel-utils = nccr_cat_scripts.excel_utils:cli',
+            'tab-utils = nccr_cat_scripts.tabular_utils:cli',
         ],
     },
     
