@@ -522,22 +522,22 @@ def split_tables(file, in_format=None, out_format=None, inplace=False, destinati
     # 3. Handle Output Path
     out_format = in_format if out_format is None else out_format
     basename = os.path.splitext(file)[0]
+    if destination:
+        os.makedirs(destination, exist_ok=True)
     
     if out_format in ['xlsx', 'xls']:
-        if destination:
-            outfile = destination
-        elif inplace:
+        if inplace:
             outfile = file
         else:
-            outfile = f"{basename}_split.{out_format}"
-        
-        # Ensure the output directory exists
-        os.makedirs(os.path.dirname(outfile) or '.', exist_ok=True)
+            if destination:
+                outfile = os.path.join(destination, os.path.split(f"{basename}_split.{out_format}")[1])
+            else:
+                outfile = f"{basename}_split.{out_format}"
         
         # Ensure the filename is not too long
         if len(outfile) > 218: 
              logger.warning(f"Output filename {outfile} is too long, truncating.")
-             outfile = f"{basename[:210]}_split.{out_format}"
+             outfile = os.path.join(destination, f"{basename[:210]}_split.{out_format}")
 
         # 4. Write Output (XLSX/XLS)
         try:
@@ -555,9 +555,14 @@ def split_tables(file, in_format=None, out_format=None, inplace=False, destinati
         # Write each table to a separate CSV file
         for k, table in tables_per_sheet["csv_only_sheet"].items():
             safe_k = _safe_sheet_name(k)
-            outfile = os.path.join(f"{basename}_split_{safe_k}.csv")
+            if destination:
+                outfile = os.path.join(destination, os.path.split(f"{basename}_split_{safe_k}.csv")[1])
+            else:
+                outfile = f"{basename}_split_{safe_k}.csv"
             table.to_csv(outfile, index=False, header=True)
         logger.info(f"Successfully split tables from {file} into multiple CSV")
+        if inplace:
+            os.remove(file)
     else:
         logger.error(f"Unsupported output format: {out_format}")
 
