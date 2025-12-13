@@ -27,7 +27,7 @@ logger.addHandler(handler)
 # --- End Logger Setup ---
 
 # Files and folders to strictly ignore during zipping/copying process
-SYSTEM_FILES_TO_IGNORE = ['.DS_Store', '__MACOSX']
+SYSTEM_FILES_TO_IGNORE = ['.DS_Store', '__MACOSX', "Thumbs.db"]
 
 def _sanitize_member_path(member, extraction_path):
     """

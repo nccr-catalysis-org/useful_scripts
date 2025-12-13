@@ -100,6 +100,10 @@ If Solution 1 fails, you need to manually add the Python installation directorie
 4.  **Add New Paths:** Click **"New"** and add the main Python folder path. Click **"New"** again and add the `Scripts` folder path.
     
 5.  **Restart Terminal:** Close and reopen your terminal window for the changes to take effect. You should now be able to run `pip install -e .`.
+
+# Updating
+If you use any functionality from this README and you see it does not work, it might be because you use an old version of the code. To update your code run `git pull`.
+
 # Importing
 To use the functions in your own scripts, import as follows:
 
@@ -162,54 +166,83 @@ To use the CLI:
 
 `zip-utils clean /path/to/file --output-filepath /path/to/output` or `zip-utils clean /path/to/file --in-place`
 
-# Excel utils
-Functionalities to clean up specific recurring issues with .xlsx files. 
+# Tabular utils
+Functionalities to check and correct specific recurring issues with tabular data files. It can handle csv, tsv, xlsx and xls. Nonetheless, formulas within .xls files cannot be read and processed and will be lost if the file is processed. As such, using xlsx is recommended.
 
-## Unpad
-Tables padded with empty space around them reduce machine readability. You can process a single .xlsx or all the .xlsx inside a folder and its subfolders recursively and remove any padding. This preserves the cell color and borders, text formatting (e.g. text color, bold, italic) and particularly **formulas** even if across sheets.
-To use the CLI:
+The module deals with the following bad practices.
+**Padded tables:** tables padded with empty space around them reduce machine readability.
+**Trailing spaces:** cells with text with trailing spaces or spaces at the beginning can reduce machine readability.
+**Multiple tables:** sheets containing more than one table reduce machine readability. The module uses empty columns and rows to detect and process multiple tables in a sheet. For the moment, only vertically or hortizontally split multiple tables are treated. Presence of both directional splits may be implemented later.
 
-```
-excel-utils unpad --source /path/to/source/dir --target /path/to/target/dir
-```
+## CLI
+The CLI command for tabular utils is `tab-utils`. This must be followed by a command: either `check` or `process`.
+Both commands need a positional argument "source" which can be either a file or a folder. In the latter case, it will act on all files within the folder and recursively in its subfolders.
 
-## Strip text
-Cells with text with trailing spaces or spaces at the beginning can reduce machine readability. You can process a single .xlsx or all the .xlsx inside a folder and its subfolders recursively and remove any space at the beginning and end of text in a cell.
-To use the CLI:
+Examples:
 ```
-excel-utils strip-text --source /path/to/source/dir --target /path/to/target/dir
-```
-
-## Clean
-This just consists in unpadding and stripping the text at the same time. You can run this function on your data before uploading to Zenodo.
-
-To use the CLI:
-```
-excel-utils clean --source /path/to/source/dir --target /path/to/target/dir
+tab-utils check --strip-unpad file.xlsx
+tab-utils check --strip-unpad folder
+tab-utils check --multi-table folder
+tab-utils process --stip-unpad folder --inplace
+tab-utils process --stip-unpad folder --destination folder_processed
+tab-utils process --vsplit-tables file.xls --out-format xlsx 
 ```
 
-## Unpad, strip, or both in a script
-The functions process_folder and process_excel_file handle the unpadding, stripping, or both.
-Use:
-
-```process_folder(source_fol: str, dest_fol: str, unpad: bool, strip_text: bool)```
-
-or 
-
-```process_excel_file(filename: str, outname: str, unpad: bool, strip_text: bool)```
-
-where the booleans `unpad` and `strip_text` control which operation(s) to perform.
-
-## Check
-You can use the function  check_folder_recursively to know if any file in it has issues of either padding or text that needs stripping.
-Use:
-``` check_folder_recursively(folder_path: str, check_padding: bool, check_strip: bool)```
-
-
-To use the CLI:
+### Check options
+You will need to select one and only one of these options.
 ```
-excel-utils unpad folder  [--padding] [--strip]
+--unpad-only  # only check for padded tables
+--strip-text  # only check for spaces at the beginning or the end of the cell value
+--strip-unpad  # check for both of the above
+--multi-table  # check for potential multi-table sheets
+```
+### Process options
+```
+--unpad-only  # only unpad the tables. NB: xls would lose their formulas
+--strip-text  # only strip the cell value
+--strip-unpad  # perform both of the above
+--vsplit-tables # split vertically-stacked tables (more details below)
+--vsplit-into-two-columns-tables  # split vertically-stacked tables into two columns tables (more details below)
+--hsplit-tables  # split horizontally-stacked tables (more details below)
 ```
 
-where the two optional flags allow to check only for that type of issue.
+You will also need to provide either `--inplace` to edit files in place or `--destination DESTINATION` to provide either a filename (for files) or a folder.
+For the processing of multitables you can provide `--out-format [csv|tsv|xlsx|xls]` to specify the output format.
+
+#### unpad
+For xlsx, this preserves the cell color and borders, text formatting (e.g. text color, bold, italic) and particularly **formulas** even if across sheets.
+Unfortunately, this is not possible for xls.
+
+#### vsplit-tables
+This splits the tables at every empty column. If a table-name header is present above the column headers, it will detect the table name and use it to name the sheets. Examples will be provided soon for more clarity.
+
+#### vsplit-into-two-columns-tables
+For any block delimited by an empty column, obtains a series of 2-columns tables. e.g. from columns A,B,C,D => [A,B], [A,C], [A,D]. Examples will be provided soon for more clarity.
+
+#### hsplit-tables
+This splits the tables at every empty row. If a table-name header is present above the column headers, it will detect the table name and use it to name the sheets. Examples will be provided soon for more clarity.
+
+## Python usage
+The main forward-facing functions are listed below.
+
+### Checking
+The functions to check are:
+```
+check_file(file, extension, check_padding, check_strip)  # the last two are booleans about whether you want to check the padding and the stripping
+check_recursively(folder, check_padding, check_strip)
+check_multitable_file(file, ext)
+check_multitable_folder(folder)
+```
+
+### Processing
+The main functions to process are:
+```
+unpad_strip_file(file, dest, ext, unpad, strip_text)  # provide dest == file to edit inplace. unpad and strip_text are booleans controlling what you want to perform
+unpad_strip_recursively(folder, dest, unpad, strip_text)
+vsplit_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
+vsplit_into_two_colum_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
+hsplit_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
+process_recursively(folder,split_func, out_format=None, destination=None, inplace=False)  # split func is one of the 3 functions above, the other arguments are described in the lines above
+```
+
 
