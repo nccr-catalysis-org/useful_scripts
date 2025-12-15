@@ -35,8 +35,8 @@ logger.addHandler(handler)
 #    - We use the simpler version here: capture (SheetName!)? or (CellRef)
 CELL_REF_REGEX: Pattern[str] = re.compile(r"((?:'[^']+'!)?|(?:\w+!)?)([A-Z]+)(\d+)")
 PROCESS_EXTENSIONS: Tuple[str, ...] = ("xlsx", "xls") 
-SEP_EXTENSIONS: Tuple[str, ...] = ("csv", "tsv")
-EXT_TO_SEP = {"csv": ",", "tsv": "\t"}
+SEP_EXTENSIONS: Tuple[str, ...] = ("csv", "tsv", "txt")
+EXT_TO_SEP = {"csv": ",", "tsv": "\t", "txt": "\s+"}
 TABULAR_EXTENSIONS: Tuple[str, ...] = PROCESS_EXTENSIONS + SEP_EXTENSIONS
 
 class InvalidFileFormatError(ValueError):
@@ -940,7 +940,43 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
     out_format = in_format if out_format is None else out_format
     write_tables(tables_per_sheet, file, out_format, destination, inplace, "split", "split tables")
 
-
+def convert_file(file, out_format=None, destination=None, inplace=False):
+    if out_format is None:
+        raise ValueError("You must select an output format")
+    if destination:
+        os.makedirs(destination, exist_ok=True)
+    ext = os.path.splitext(file.lower())[1][1:]
+    folder_path, fname = os.path.split(file)
+    basename = fname[:-(len(ext)+1)]
+    if destination is None:
+        destination = folder_path
+    if out_format == ext:
+        if inplace:
+            return
+        else:
+            sh.copy2(file, os.path.join(destination, fname))
+    if ext in SEP_EXTENSIONS:
+        dfs = {basename: pd.read_csv(file, sep=EXT_TO_SEP[ext], header=None)}
+    elif ext in PROCESS_EXTENSIONS:
+        dfs = pd.read_excel(file, sheet_name=None, header=None)
+    out_folder = folder_path if inplace else destination
+    if out_format in SEP_EXTENSIONS:
+        for sheet_name, df in dfs.items():
+            addendum = "" if len(dfs) == 1 else f"_{sheet_name}"
+            df.to_csv(os.path.join(out_folder, f"{basename}{addendum}.{out_format}"), header=False, index=False, sep=EXT_TO_SEP[out_format])
+    elif out_format in PROCESS_EXTENSIONS:
+        for sheet_name, df in dfs.items():
+            engine = _get_excel_writer_engine(out_format)
+            addendum = "" if len(dfs) == 1 else f"_{sheet_name}"
+            t = os.path.join(out_folder, f"{basename}{addendum}.{out_format}")
+            logger.info(t)
+            with pd.ExcelWriter(os.path.join(out_folder, f"{basename}{addendum}.{out_format}"), engine=engine) as writer:
+                for sheet_name, df in dfs.items():
+                    new_sheet_name = _safe_sheet_name(sheet_name)
+                    df.to_excel(writer, sheet_name=new_sheet_name, index=False, header=False)
+    if inplace:
+        os.remove(file)
+                    
 def process_recursively(path: str, file_func: Callable[..., None], destination=None,
                         out_format=None, inplace=False) -> None:
     """
@@ -988,7 +1024,8 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
             logger.error(f"Failed to process {path}: {e}")
     else:
         logger.error(f"Invalid path: {path} is neither a file nor a directory.")
-        
+     
+    
 # =============================================================================
 # CLI Implementation
 # =============================================================================
