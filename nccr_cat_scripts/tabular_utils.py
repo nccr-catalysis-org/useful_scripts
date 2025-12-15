@@ -618,15 +618,13 @@ def read_sheets(file, frmt=None):
     """
     file_lower = file.lower()
     if frmt is None:
-        ext = os.path.splitext(file_lower)[1][1:]
-        if ext in TABULAR_EXTENSIONS:
-            frmt = ext
-        else:
+        frmt = os.path.splitext(file_lower)[1][1:]
+        if frmt not in TABULAR_EXTENSIONS:
             raise InvalidFileFormatError("Only csv/tsv, xlsx, and xls can be processed")
     
     # Determine the read function
     if frmt in STRICT_SEP_EXTENSIONS:
-        sep = EXT_TO_SEP[ext]
+        sep = EXT_TO_SEP[frmt]
         # Read csv
         fname = os.path.splitext(os.path.split(file)[1])[0]
         sheets = {fname: {"df": pd.read_csv(file, sep=sep)}}
@@ -639,7 +637,7 @@ def read_sheets(file, frmt=None):
         except Exception as e:
             logger.warning(f"Could not read first row for original column names in {file}: {e}")
             sheets[fname]["columns"] = sheets[fname]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
-    elif frmt in ["xlsx", "xls"]:
+    elif frmt in PROCESS_EXTENSIONS:
         sheets = {k: {"df": v} for k, v in pd.read_excel(file, sheet_name=None).items()}
         for sheet_name, dict_ in sheets.items():
             try:
@@ -723,10 +721,11 @@ def check_and_clean_folderpath(path):
 
 def write_tables(tables_per_sheet, source_file, out_format, destination, inplace, operation, operation_name):
     basename = os.path.splitext(source_file)[0]
+    folder_name = os.path.split(source_file)[0]
     if destination:
         os.makedirs(destination, exist_ok=True)
     
-    if out_format in ['xlsx', 'xls']:
+    if out_format in PROCESS_EXTENSIONS:
         if inplace:
             out_file = source_file
         else:
@@ -746,6 +745,7 @@ def write_tables(tables_per_sheet, source_file, out_format, destination, inplace
             with pd.ExcelWriter(out_file, engine=engine) as writer:
                 for sheet_name, tables in tables_per_sheet.items():
                     for k, table in tables.items():
+                        logger.info(k)
                         new_sheet_name = _safe_sheet_name(f"{sheet_name}_{k}")
                         table.to_excel(writer, sheet_name=new_sheet_name, index=False, header=True)
             logger.info(f"Successfully {operation_name} from {source_file} to {out_format} sheets in {out_file}")
@@ -754,14 +754,14 @@ def write_tables(tables_per_sheet, source_file, out_format, destination, inplace
 
     elif out_format in STRICT_SEP_EXTENSIONS:
         # Write each table to a separate CSV source_file
-        fname = list(tables_per_sheet.keys())[0]
-        for k, table in tables_per_sheet[fname].items():
-            safe_k = _safe_sheet_name(k)
-            if destination:
-                out_file = os.path.join(destination, os.path.split(f"{basename}_{operation}_{safe_k}.{out_format}")[1])
-            else:
-                out_file = f"{basename}_{operation}_{safe_k}.{out_format}"
-            table.to_csv(out_file, index=False, header=True, sep=EXT_TO_SEP[out_format])
+        for sheet_name, tables in tables_per_sheet.items():
+            for k, table in tables.items():
+                safe_k = _safe_sheet_name(k)
+                if destination:
+                    out_file = os.path.join(destination, f"{sheet_name}_{operation}_{safe_k}.{out_format}")
+                else:
+                    out_file = os.path.join(folder_name, f"{basename}_{operation}_{safe_k}.{out_format}")
+                table.to_csv(out_file, index=False, header=True, sep=EXT_TO_SEP[out_format])
         logger.info(f"Successfully {operation_name} from {source_file} into multiple {out_format.upper()}")
         if inplace:
             os.remove(source_file)
@@ -802,12 +802,14 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
             end = block_end
             if end > start:  # Extract table if block is not empty
                 table = df.iloc[:, start:end].copy()
+                # logger.info(table.iloc[:3])
                 if not any(original_columns[start:end]):  # empty header line
                     table = table.iloc[1:]
-                    key = start
+                    key = n + 1
                 elif original_columns[start] and not any(original_columns[start+1:end]):  # table title and column headers
                     key = df.columns[start]
                     table.columns = table.iloc[0].tolist()
+                    table = table.iloc[1:]
                 else:
                     table.columns = original_columns[start:end]
                     key = n + 1
@@ -819,7 +821,6 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
         if destination:  # no point in re-writing the file
             sh.copy2(file, destination)
         return
-    
     out_format = in_format if out_format is None else out_format
     write_tables(tables_per_sheet, file, out_format, destination, inplace, "split", "split tables")
 
@@ -905,6 +906,11 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
         
         # 1. Identify table boundaries (columns that are all NaN)
         empty_rows_indices = [n for n, col in enumerate(df.index) if df.iloc[n].isna().all()]
+        if not empty_rows_indices:
+            logger.info(f"No multiple tables found in sheet {sheet_name} in {file} to split.")
+            tables_per_sheet[sheet_name] = {sheet_name: df}
+            continue
+        multi_tables = True
         table_boundaries = empty_rows_indices + [len(df.index)]
         
         # 2. Extract tables
@@ -1000,8 +1006,8 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
         for fol, subfols, files in os.walk(source_fol):
             if destination:
                 correspfol = fol.replace(source_fol, destination)
-            for subfol in subfols:
-                os.makedirs(os.path.join(correspfol, subfol), exist_ok=True)
+                for subfol in subfols:
+                    os.makedirs(os.path.join(correspfol, subfol), exist_ok=True)
             for file in files:
                 file_path: str = os.path.join(fol, file)
                 ext = os.path.splitext(file)[1][1:]
