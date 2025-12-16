@@ -27,7 +27,7 @@ logger.addHandler(handler)
 # --- End Logger Setup ---
 
 # Files and folders to strictly ignore during zipping/copying process
-SYSTEM_FILES_TO_IGNORE = ['.DS_Store', '__MACOSX', "Thumbs.db"]
+SYSTEM_FILES_TO_IGNORE = ('.DS_Store', '__MACOSX', "Thumbs.db")
 
 def _sanitize_member_path(member, extraction_path):
     """
@@ -108,8 +108,8 @@ def extract_recursively_in_folder(folder, remove_zips=False):
             try:
                 with zf.ZipFile(zip_fp, "r") as f:
                     for member in f.namelist():
-                        # Exclude __MACOSX entries during extraction
-                        if member.startswith("__MACOSX/"):
+                        # Exclude SYSTEM_FILES_TO_IGNORE entries during extraction
+                        if member.startswith(SYSTEM_FILES_TO_IGNORE):
                             continue
                         
                         # Sanitize the path before extraction to prevent ZipSlip
@@ -161,7 +161,7 @@ def extract_recursively_from_file(filepath, remove_zips=False):
     try:
         with zf.ZipFile(filepath, "r") as f:
             for member in f.namelist():
-                if member.startswith("__MACOSX/"):
+                if member.startswith(SYSTEM_FILES_TO_IGNORE):
                     continue
                 _sanitize_member_path(member, extraction_dir)
                 f.extract(member, path=extraction_dir)
@@ -240,7 +240,7 @@ def _make_naked(zip_fp: str, single_root_folder: str) -> bool:
 def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_replace: Dict[str, str]):
     """
     Reads from zip_fp, writes cleaned contents to temp_zip_fp.
-    - Excludes __MACOSX and .DS_Store entries.
+    - Excludes __MACOSX , .DS_Store, and Thumbs.db entries.
     - Replaces nested zips using files provided in nested_zips_to_replace.
     """
     
@@ -253,7 +253,7 @@ def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_repl
             for member in zf_in.infolist():
                 member_name = member.filename
                 
-                # A. Skip __MACOSX and .DS_Store
+                # A. Skip SYSTEM_FILES_TO_IGNORE
                 if True in [i in member_name for i in SYSTEM_FILES_TO_IGNORE] :
                     # Logging done in the main function
                     continue
@@ -273,7 +273,7 @@ def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_repl
 
 def clean_zip_recursively(zip_fp: str):
     """
-    Recursively cleans a single zip file by removing __MACOSX and .DS_Store entries, 
+    Recursively cleans a single zip file by removing __MACOSX , .DS_Store, and Thumbs.db entries, 
     making it naked, and cleaning any nested zip files within.
     This process is done in-place by rewriting the zip file.
     """
@@ -289,7 +289,7 @@ def clean_zip_recursively(zip_fp: str):
         logger.error(f"ERROR: Archive is corrupted and cannot be read: {zip_filename}")
         return
 
-    # 2. Iterate and recursively clean nested zips and identify __MACOSX and .DS_Store
+    # 2. Iterate and recursively clean nested zips and identify __MACOSX , .DS_Store, and Thumbs.db
     nested_zips_to_replace: Dict[str, str] = {} # {member_name: path_to_cleaned_temp_zip}
     needs_rewrite = False
     
@@ -334,7 +334,7 @@ def clean_zip_recursively(zip_fp: str):
             # Create a temporary path for the rewritten archive
             temp_cleaned_zip = os.path.join(tempfile.gettempdir(), f"final_clean_{zip_filename}_{os.getpid()}")
             
-            # Perform the rewrite (skipping __MACOSX and .DS_Store, replacing nested zips)
+            # Perform the rewrite (skipping __MACOSX , .DS_Store, and Thumbs.db, replacing nested zips)
             _rewrite_zip_for_cleaning(zip_fp, temp_cleaned_zip, nested_zips_to_replace)
             
             # Replace the original zip file
