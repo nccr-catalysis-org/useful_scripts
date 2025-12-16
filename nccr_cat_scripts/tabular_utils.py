@@ -7,6 +7,7 @@ Created on Wed Nov 26 16:44:53 2025
 """
 
 import argparse
+from itertools import product
 import logging
 import os
 import re
@@ -14,6 +15,8 @@ import shutil as sh
 import sys
 from typing import Any, Callable, Dict, List, Match, Optional, Pattern, Tuple
 
+
+import numpy as np
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils.cell import column_index_from_string, get_column_letter
@@ -745,7 +748,6 @@ def write_tables(tables_per_sheet, source_file, out_format, destination, inplace
             with pd.ExcelWriter(out_file, engine=engine) as writer:
                 for sheet_name, tables in tables_per_sheet.items():
                     for k, table in tables.items():
-                        logger.info(k)
                         new_sheet_name = _safe_sheet_name(f"{sheet_name}_{k}")
                         table.to_excel(writer, sheet_name=new_sheet_name, index=False, header=True)
             logger.info(f"Successfully {operation_name} from {source_file} to {out_format} sheets in {out_file}")
@@ -822,7 +824,7 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
             sh.copy2(file, destination)
         return
     out_format = in_format if out_format is None else out_format
-    write_tables(tables_per_sheet, file, out_format, destination, inplace, "split", "split tables")
+    write_tables(tables_per_sheet, file, out_format, destination, inplace, "vsplit", "split tables vertically")
 
 
 def vsplit_into_two_colum_tables(file, in_format=None, out_format=None, inplace=False, destination=None):
@@ -945,7 +947,7 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
         return
     
     out_format = in_format if out_format is None else out_format
-    write_tables(tables_per_sheet, file, out_format, destination, inplace, "split", "split tables")
+    write_tables(tables_per_sheet, file, out_format, destination, inplace, "hsplit", "split tables horizontally")
 
 def convert_file(file, out_format=None, destination=None, inplace=False):
     if out_format is None:
@@ -985,7 +987,112 @@ def convert_file(file, out_format=None, destination=None, inplace=False):
         raise InvalidFileFormatError("Unsupported output format {out_format}")
     if inplace:
         os.remove(file)
-                    
+
+def detect_table(bool_df, point):
+    x, y = point
+    edges = np.array([[x, x], [y, y]])
+    nrows, ncols = bool_df.shape
+    maxs = ncols -1, nrows -1 
+    while True:
+        changed = False
+        for n in range(2):  # x or y
+            for m in range(2):  # first or second edge
+                incr = 1 if m else -1
+                new_edges = edges.copy()
+                if 0 <= new_edges[n,m] + incr <=  maxs[n]:
+                    new_edges[n, m] += incr
+                else:
+                    continue
+                if n:
+                    non_empty = bool_df.iloc[new_edges[1,m], new_edges[0,0]:new_edges[0,1] + 1].any()
+                else:
+                    non_empty = bool_df.iloc[new_edges[1,0]:new_edges[1,1]+1, new_edges[0,m]].any()
+                if non_empty:
+                    changed = True
+                    edges = new_edges
+        if not changed:
+            break
+    return edges
+            
+def slice_table(df, edges):
+    return df.iloc[edges[1,0]: edges[1,1] + 1, edges[0,0]: edges[0,1] + 1].copy()
+
+def point_in_table(edges, point, padding=False, nrows=None, ncols=None):
+    edges_cp = edges.copy()
+    if padding:
+        if nrows is None or ncols is None:
+            raise ValueError("if you want padding, you must provide nrows and ncols")
+        if edges_cp[0, 0]:
+            edges_cp[0,0] -= 1
+        if edges_cp[1, 0]:
+            edges_cp[1, 0] -= 1
+        if edges_cp[0,1] < ncols - 1:
+            edges_cp[0,1] += 1
+        if edges_cp[1,1] < nrows - 1:
+            edges_cp[1,1] += 1
+    return edges_cp[0,0] <= point[0] <= edges_cp[0,1] and edges_cp[1,0] <= point[1] <= edges_cp[1,1]
+
+def point_in_any_table(edges_list, point, padding=False, nrows=None, ncols=None):
+    for edges in edges_list:
+        in_table = point_in_table(edges, point, padding=padding, nrows=nrows, ncols=ncols)
+        if in_table:
+            return True
+    return False
+
+def detect_table_edges(bool_df):
+    nrows, ncols = bool_df.shape
+    coords = product(range(ncols), range(nrows))
+    seen = set()
+    table_edges = []
+    for point in coords:
+        if bool_df.iloc[point[1], point[0]] and (point not in seen) and not point_in_any_table(table_edges, point, padding=True, nrows=nrows, ncols=ncols):
+            new_table_edges = detect_table(bool_df, point)
+            table_edges.append(new_table_edges)
+        seen.add(point)
+    return table_edges
+
+def get_tables_df(df):
+    bool_df = df.notna()
+    table_edges = detect_table_edges(bool_df)
+    tables = {}
+    if len(table_edges) == 1:
+        return {"": df}
+    for n, edges in enumerate(table_edges):
+        key = False
+        table = slice_table(df, edges)
+        row0, row1 = table.iloc[0], table.iloc[1]
+        if sum(bool(pd.notna(x)) for x in row0) == 1:  # only 1 notna => table title
+            idx = [n for n, x in enumerate(row0) if pd.notna(x)][0]
+            key = row0.iloc[idx]
+            table = table.iloc[1:]
+            row0 = row1
+        key = n + 1 if not key else key
+        if all(isinstance(x, str) or pd.isna(x) for x in row0):  # not data
+            table.columns = [str(x) if pd.notna(x) else "" for x in table.iloc[0]]
+            table = table.iloc[1:]
+        tables[key] = table
+    return tables
+
+def split_tables_file(file, in_format=None, out_format=None, inplace=False, destination=None):
+    try:
+        sheets, in_format = read_sheets(file, frmt=in_format)
+    except InvalidFileFormatError as e:
+        logger.error(f"Skipping split for {file}: {e}")
+        return
+    if destination:
+        destination = check_and_clean_folderpath(destination)
+    
+    tables_per_sheet = {}
+    for sheet_name, data in sheets.items():
+        df = data["df"]
+        tables_per_sheet[sheet_name] = get_tables_df(df)
+    if all([len(v) == 1 for k, v in tables_per_sheet.items()]):
+        if destination:
+            fname =os.path.split(file)[1]
+            sh.copy2(file, os.path.join(destination, fname))
+    out_format = in_format if out_format is None else out_format
+    write_tables(tables_per_sheet, file, out_format, destination, inplace, "splitall", "split all tables")
+    
 def process_recursively(path: str, file_func: Callable[..., None], destination=None,
                         out_format=None, inplace=False, format_to_process=None) -> None:
     """
@@ -1090,6 +1197,8 @@ def process_command(args):
             split_func = vsplit_into_two_colum_tables
         elif args.hsplit_tables:
             split_func = hsplit_tables
+        elif args.split_all_tables:
+            split_func = split_tables_file
     
         if os.path.isfile(args.source):
             split_func(args.source, in_format=ext, out_format=args.out_format, inplace=args.inplace, destination=args.destination)
@@ -1178,6 +1287,7 @@ def cli():
     process_group.add_argument('--vsplit-tables', action='store_true', help='Split vertical multitables.')
     process_group.add_argument('--vsplit-into-two-columns-tables', action='store_true', help='Vertically split into two columns tables.')
     process_group.add_argument('--hsplit-tables', action='store_true', help='Split horizontal multitables')
+    process_group.add_argument('--split-all-tables', action='store_true', help='Split all multitables')
     
     # Mutually Exclusive Group for 'check' options
     check_group = parser_check.add_mutually_exclusive_group(required=True)
