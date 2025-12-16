@@ -210,6 +210,7 @@ You will need to select one and only one of these options.
 --vsplit-tables # split vertically-stacked tables (more details below)
 --vsplit-into-two-columns-tables  # split vertically-stacked tables into two columns tables (more details below)
 --hsplit-tables  # split horizontally-stacked tables (more details below)
+--split-all-tables # detect tales in 2 dimensions (NB. read further info below)
 ```
 
 You will also need to provide either `--inplace` to edit files in place or `--destination DESTINATION` to provide either a filename (for files) or a folder.
@@ -227,6 +228,9 @@ For any block delimited by an empty column, obtains a series of 2-columns tables
 
 #### hsplit-tables
 This splits the tables at every empty row. If a table-name header is present above the column headers, it will detect the table name and use it to name the sheets. Examples will be provided soon for more clarity.
+
+### split-all-tables
+This detects and splits tables in both dimensions. Nonetheless, the use of vsplit and hsplit is strongly recommended when possible, because they will be faster and more robust. For instance, a full row of empty values in a vertical table will not cause issues with vsplit, but it will lead to the table being split with "split-all-tables". Nonetheless, if you have grids of tables in more than one dimension, this function allows to split them.
 
 ### Convert options
 ```
@@ -256,7 +260,8 @@ unpad_strip_recursively(folder, dest, unpad, strip_text)
 vsplit_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
 vsplit_into_two_colum_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
 hsplit_tables(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
-process_recursively(folder,split_func, out_format=None, destination=None, inplace=False)  # split func is one of the 3 functions above, the other arguments are described in the lines above
+split_tables_file(file, in_format=[extension, optional], out_format=[desired output format, optional], inplace=args.inplace, destination=[destination path, optional])
+process_recursively(folder,split_func, out_format=None, destination=None, inplace=False)  # split func is one of the 4 functions above, the other arguments are described in the lines above
 ```
 
 ### Converting
