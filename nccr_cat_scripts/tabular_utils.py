@@ -39,8 +39,8 @@ logger.addHandler(handler)
 CELL_REF_REGEX: Pattern[str] = re.compile(r"((?:'[^']+'!)?|(?:\w+!)?)([A-Z]+)(\d+)")
 PROCESS_EXTENSIONS: Tuple[str, ...] = ("xlsx", "xls") 
 STRICT_SEP_EXTENSIONS: Tuple[str, ...] = ("csv", "tsv")
-WIDE_SEP_EXTENSIONS: Tuple[str, ...] = ("csv", "tsv", "txt")
-EXT_TO_SEP = {"csv": ",", "tsv": "\t", "txt": "\s+"}
+WIDE_SEP_EXTENSIONS: Tuple[str, ...] = ("csv", "tsv", "txt", "dat")
+EXT_TO_SEP = {"csv": ",", "tsv": "\t", "txt": "\s+", "dat": "\s+"}
 TABULAR_EXTENSIONS: Tuple[str, ...] = PROCESS_EXTENSIONS + STRICT_SEP_EXTENSIONS
 
 class InvalidFileFormatError(ValueError):
@@ -949,7 +949,7 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
     out_format = in_format if out_format is None else out_format
     write_tables(tables_per_sheet, file, out_format, destination, inplace, "hsplit", "split tables horizontally")
 
-def convert_file(file, out_format=None, destination=None, inplace=False):
+def convert_file(file, out_format=None, destination=None, inplace=False, sep=None):
     if out_format is None:
         raise ValueError("You must select an output format")
     if destination:
@@ -965,7 +965,9 @@ def convert_file(file, out_format=None, destination=None, inplace=False):
         else:
             sh.copy2(file, os.path.join(destination, fname))
     if ext in WIDE_SEP_EXTENSIONS:
-        dfs = {basename: pd.read_csv(file, sep=EXT_TO_SEP[ext], header=None)}
+        if sep is None:
+            EXT_TO_SEP[ext]
+        dfs = {basename: pd.read_csv(file, sep=sep, header=None)}
     elif ext in PROCESS_EXTENSIONS:
         dfs = pd.read_excel(file, sheet_name=None, header=None)
     out_folder = folder_path if inplace else destination
@@ -1094,7 +1096,8 @@ def split_tables_file(file, in_format=None, out_format=None, inplace=False, dest
     write_tables(tables_per_sheet, file, out_format, destination, inplace, "splitall", "split all tables")
     
 def process_recursively(path: str, file_func: Callable[..., None], destination=None,
-                        out_format=None, inplace=False, format_to_process=None) -> None:
+                        out_format=None, inplace=False, format_to_process=None,
+                        **kwargs) -> None:
     """
     Recursively processes all supported tabular files (.xlsx, .xls, .csv) 
     in a directory or processes a single file, applying the provided file_func.
@@ -1124,7 +1127,8 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
                     try:
                         dest_path = None if destination is None else correspfol
                         file_func(file_path, destination=dest_path,
-                                  out_format=out_format, inplace=inplace)
+                                  out_format=out_format, inplace=inplace,
+                                  **kwargs)
                     except Exception as e:
                         logger.error(f"Failed to process {file_path}: {e}")
                 elif not inplace:
@@ -1136,7 +1140,8 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
         logger.info(f"Processing single file: {path}")
         try:
             file_func(path, destination=destination,
-                      out_format=out_format, inplace=inplace)
+                      out_format=out_format, inplace=inplace,
+                      **kwargs)
         except Exception as e:
             logger.error(f"Failed to process {path}: {e}")
     else:
@@ -1209,10 +1214,10 @@ def convert_command(args):
     if not os.path.exists(args.source):
         FileNotFoundError(f"Your source {args.source} does not exist!!")
     if os.path.isfile(args.source):
-        convert_file(args.source, out_format=args.out_format, destination=args.destination, inplace=args.inplace)
+        convert_file(args.source, out_format=args.out_format, destination=args.destination, inplace=args.inplace, sep=args.sep)
     elif os.path.isdir(args.source):
         process_recursively(args.source, convert_file, destination=args.destination, inplace=args.inplace,
-                            out_format=args.out_format, format_to_process=args.in_format)
+                            out_format=args.out_format, format_to_process=args.in_format, sep=args.sep)
 
 def cli():
     """Configures and runs the command line interface."""
@@ -1320,6 +1325,12 @@ def cli():
         type=str,
         dest='in_format',
         help='The extension of files you want to process if working in a folder'
+    )
+    
+    parser_convert.add_argument(
+        'separator',
+        dest="sep",
+        help='The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. To explicitly specify space use "\s+"'
     )
 
     # 2. Mutually Exclusive Group for output location (Required for PROCESS)
