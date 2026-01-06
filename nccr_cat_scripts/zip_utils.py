@@ -6,6 +6,8 @@ Created on Thu Nov 20 14:53:00 2025
 @author: nr
 """
 import zipfile as zf
+import tarfile
+import rarfile
 import os
 import logging
 import tempfile
@@ -27,7 +29,7 @@ logger.addHandler(handler)
 # --- End Logger Setup ---
 
 # Files and folders to strictly ignore during zipping/copying process
-SYSTEM_FILES_TO_IGNORE = ['.DS_Store', '__MACOSX', "Thumbs.db"]
+SYSTEM_FILES_TO_IGNORE = ('.DS_Store', '__MACOSX', "Thumbs.db")
 
 def _sanitize_member_path(member, extraction_path):
     """
@@ -47,90 +49,161 @@ def _sanitize_member_path(member, extraction_path):
             raise Exception(f"Potential ZipSlip attempt detected for: {member}")
     return abs_target
 
+def getext(path):
+    if path.endswith(".tar.gz"):
+        return "tar.gz"
+    return os.path.splitext(path.lower())[1][1:]
 
-def is_single_root_folder(zip_fp):
+def is_single_root_folder(archive_fp, ext=None):
     """
     Checks if the zip file contains only a single top-level folder (excluding __MACOSX 
     entries), and returns True if so, False otherwise.
     """
+    if ext is None:
+        ext = getext(archive_fp)
     try:
-        with zf.ZipFile(zip_fp, "r") as f:
-            namelist = f.namelist()
-            if not namelist:
-                return False # Empty zip file
-
-            # Collect all unique top-level directory names
-            top_levels = set()
-            for name in namelist:
-                # Ignore __MACOSX or .DS_Store
-                if True in [i in name for i in SYSTEM_FILES_TO_IGNORE]:
-                    continue
-                # Split 'folder/file.txt' into 'folder' and 'file.txt'
-                root_name = name.split(os.sep, 1)[0]
-                # Only consider entries that contain subdirectories or are explicit directories
-                if os.sep in name or name.endswith(os.sep):
-                    top_levels.add(root_name)
-
-            # Check if there is exactly one top-level component (indicating a wrapped archive)
-            if len(top_levels) == 1:
-                return True
-            
+        if ext == "zip":
+            with zf.ZipFile(archive_fp, "r") as f:
+                namelist = f.namelist()
+        
+        elif ext == "rar":
+            with rarfile.RarFile(archive_fp, "r") as f:
+                namelist = f.namelist()
+        
+        elif ext in [".tar.gz", ".tgz", ".tar"]:
+            with tarfile.open(archive_fp, "r") as f:
+                namelist = f.getnames()
+        
+        else:
+            logger.error(f"Unsupported file format for : {archive_fp}")
             return False
+
+        if not namelist:
+            return False
+
+        # Collect all unique top-level directory names
+        top_levels = set()
+        for name in namelist:
+            # Ignore __MACOSX or .DS_Store
+            if True in [i in name for i in SYSTEM_FILES_TO_IGNORE]:
+                continue
+            # Split 'folder/file.txt' into 'folder' and 'file.txt'
+            root_name = name.split(os.sep, 1)[0]
+            # Only consider entries that contain subdirectories or are explicit directories
+            if os.sep in name or name.endswith(os.sep):
+                top_levels.add(root_name)
+
+        # Check if there is exactly one top-level component (indicating a wrapped archive)
+        if len(top_levels) == 1:
+            return True
+        
+        return False
     except Exception as e:
         # Log error if the zip file inspection fails
-        logger.error(f"Error inspecting {os.path.basename(zip_fp)}: {e}")
+        logger.error(f"Error inspecting {os.path.basename(archive_fp)}: {e}")
         return False
 
-def extract_recursively_in_folder(folder, remove_zips=False):
+def extract_zip(zip_fp, extraction_path, remove_archives, extracted=None):
+    with zf.ZipFile(zip_fp, "r") as f:
+        for member in f.namelist():
+            # Exclude SYSTEM_FILES_TO_IGNORE entries during extraction
+            if member.startswith(SYSTEM_FILES_TO_IGNORE):
+                continue
+            
+            # Sanitize the path before extraction to prevent ZipSlip
+            _sanitize_member_path(member, extraction_path)
+            
+            # Extract the member to the determined path
+            f.extract(member, path=extraction_path)
+    
+    if extracted is not None:
+        extracted.add(zip_fp)
+    if remove_archives:
+        os.remove(zip_fp)
+    
+
+def extract_rar(rar_fp, extraction_path, remove_rars, extracted=None):
+    with rarfile.RarFile(rar_fp, "r") as f:
+        for member in f.namelist():
+            # Exclude SYSTEM_FILES_TO_IGNORE entries
+            if member.startswith(tuple(SYSTEM_FILES_TO_IGNORE)):
+                continue
+            
+            # Sanitize the path before extraction
+            _sanitize_member_path(member, extraction_path)
+            
+            # Extract the member
+            f.extract(member, path=extraction_path)
+    
+    if extracted is not None:
+        extracted.add(rar_fp)
+    if remove_rars:
+        os.remove(rar_fp)
+
+def extract_tar(tar_fp, extraction_path, remove_tars, extracted=None):
+    # "r:*" opens the file for reading with transparent compression (gz, bz2, or none)
+    with tarfile.open(tar_fp, "r:*") as f:
+        for member in f.getmembers():
+            # member is a TarInfo object; we use member.name for path logic
+            if member.name.startswith(tuple(SYSTEM_FILES_TO_IGNORE)):
+                continue
+            
+            # Sanitize the path using the string name
+            _sanitize_member_path(member.name, extraction_path)
+            
+            # Extract the member object
+            f.extract(member, path=extraction_path)
+    
+    if extracted is not None:
+        extracted.add(tar_fp)
+    if remove_tars:
+        os.remove(tar_fp)
+        
+def extract_recursively_in_folder(folder, remove_archives=False):
     # Loop continuously to handle archives that extract other archives within the same folder
     while True:
         extracted = set()
         # Find all zip files in the current folder
-        zip_fps = [os.path.join(folder, i) for i in os.listdir(folder) if i.endswith("zip")]
+        archive_fps = [os.path.join(folder, i) for i in os.listdir(folder) if i.endswith(("zip", "rar", "tar.gz", "tgz", "tar"))]
         
-        for zip_fp in zip_fps:
+        for archive_fp in archive_fps:
+            ext = getext(archive_fp)
             # Determine extraction path: 
             # Unwrap (to parent folder) if it contains a single root folder.
             # Otherwise, create a container folder (named after the zip file, minus extension).
-            if is_single_root_folder(zip_fp):
+            if is_single_root_folder(archive_fp):
                  # Unwrap case: Extract contents directly into the current folder
-                extraction_path = os.path.split(zip_fp)[0]
-                logger.info(f"-> Unwrapping {os.path.basename(zip_fp)} into {os.path.basename(extraction_path)}/")
+                extraction_path = os.path.split(archive_fp)[0]
+                logger.info(f"-> Unwrapping {os.path.basename(archive_fp)} into {os.path.basename(extraction_path)}/")
             else:
                 # Container case: Extract into a new folder named after the zip file
-                extraction_path = zip_fp[:-4]
-                logger.info(f"-> Creating container and extracting {os.path.basename(zip_fp)} to {os.path.basename(extraction_path)}/")
+                extraction_path = archive_fp[:-(len(ext) + 1)]
+                logger.info(f"-> Creating container and extracting {os.path.basename(archive_fp)} to {os.path.basename(extraction_path)}/")
 
             # Ensure the target directory exists (for the container case)
             os.makedirs(extraction_path, exist_ok=True)
             
             # Perform the extraction
             try:
-                with zf.ZipFile(zip_fp, "r") as f:
-                    for member in f.namelist():
-                        # Exclude __MACOSX entries during extraction
-                        if member.startswith("__MACOSX/"):
-                            continue
-                        
-                        # Sanitize the path before extraction to prevent ZipSlip
-                        _sanitize_member_path(member, extraction_path)
-                        
-                        # Extract the member to the determined path
-                        f.extract(member, path=extraction_path)
-                
-                extracted.add(zip_fp)
-                if remove_zips:
-                    os.remove(zip_fp)
-            
+                if ext == "zip":
+                    extract_zip(archive_fp, extraction_path, remove_archives, extracted=extracted)
+                elif ext == "rar":
+                    extract_rar(archive_fp, extraction_path, remove_archives, extracted=extracted)
+                elif ext in ["tar.gz", "tgz", "tar"]:
+                    extract_tar(archive_fp, extraction_path, remove_archives, extracted=extracted)
             except zf.BadZipFile:
-                logger.error(f"Error: {os.path.basename(zip_fp)} is a bad zip file.")
+                logger.error(f"Error: {os.path.basename(archive_fp)} is a bad zip file.")
+            except (rarfile.BadRarFile, rarfile.NotRarFile):
+                logger.error(f"Error: {os.path.basename(archive_fp)} is a bad or invalid RAR file.")
+            except tarfile.ReadError:
+                logger.error(f"Error: {os.path.basename(archive_fp)} is a bad tar file or has unsupported compression.")
             except Exception as e:
-                logger.error(f"Error extracting {os.path.basename(zip_fp)}: {e}")
+                logger.error(f"Error extracting {os.path.basename(archive_fp)}: {e}")
         
         # Check if new zip files were created during this iteration. 
         # If no new zips were extracted (the set difference is empty), break the loop.
-        current_zip_fps = set(os.path.join(folder, i) for i in os.listdir(folder) if i.endswith("zip"))
-        if not(current_zip_fps - extracted):
+        current_archive_fps = set(os.path.join(folder, i) for i in os.listdir(folder) if i.endswith("zip"))
+        if not(current_archive_fps - extracted):
             break
     
     # After iterative extraction is complete, recursively process all subfolders
@@ -141,10 +214,10 @@ def extract_recursively_in_folder(folder, remove_zips=False):
     ]
     
     for subfolder in subfolders:
-        extract_recursively_in_folder(subfolder, remove_zips=remove_zips)
+        extract_recursively_in_folder(subfolder, remove_archives=remove_archives)
 
 
-def extract_recursively_from_file(filepath, remove_zips=False):
+def extract_recursively_from_file(filepath, remove_archives=False):
     """
     Handles the initial extraction of a single zip file, 
     then calls the recursive folder processing function.
@@ -159,36 +232,40 @@ def extract_recursively_from_file(filepath, remove_zips=False):
     
     # Perform extraction member-by-member for safety and exclusion
     try:
-        with zf.ZipFile(filepath, "r") as f:
-            for member in f.namelist():
-                if member.startswith("__MACOSX/"):
-                    continue
-                _sanitize_member_path(member, extraction_dir)
-                f.extract(member, path=extraction_dir)
-        
-        if remove_zips:
-            os.remove(filepath)
+        ext = getext(filepath)
+        if ext == "zip":
+            extract_zip(filepath, extraction_dir, remove_archives)
+        elif ext == "rar":
+            extract_rar(filepath, extraction_dir, remove_archives)
+        elif ext in ["tar.gz", "tgz", "tar"]:
+            extract_tar(filepath, extraction_dir, remove_archives)
     except zf.BadZipFile:
         logger.error(f"Error: {os.path.basename(filepath)} is a bad zip file, aborting recursive extraction.")
+        return
+    except (rarfile.BadRarFile, rarfile.NotRarFile):
+        logger.error(f"Error: {os.path.basename(filepath)} is a bad rar file, aborting recursive extraction.")
+        return
+    except tarfile.ReadError:
+        logger.error(f"Error: {os.path.basename(filepath)} is a bad tar file or has unsupported compression, aborting recursive extraction.")
         return
     except Exception as e:
         logger.error(f"Error extracting {os.path.basename(filepath)}: {e}")
         return
 
     # Continue recursively in the newly created folder
-    extract_recursively_in_folder(extraction_dir, remove_zips=remove_zips)
+    extract_recursively_in_folder(extraction_dir, remove_archives=remove_archives)
     
 
-def extract_recursively(path, remove_zips=False):
+def extract_recursively(path, remove_archives=False):
     """
     Main entry point: normalizes the path and calls the appropriate handler 
     based on whether the path is a file (ending in .zip) or a folder.
     """
     path = os.path.abspath(path)
     if path.lower().endswith(".zip"):
-        extract_recursively_from_file(path, remove_zips=remove_zips)
+        extract_recursively_from_file(path, remove_archives=remove_archives)
     else:
-        extract_recursively_in_folder(path, remove_zips=remove_zips)
+        extract_recursively_in_folder(path, remove_archives=remove_archives)
         
         
 def _make_naked(zip_fp: str, single_root_folder: str) -> bool:
@@ -240,7 +317,7 @@ def _make_naked(zip_fp: str, single_root_folder: str) -> bool:
 def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_replace: Dict[str, str]):
     """
     Reads from zip_fp, writes cleaned contents to temp_zip_fp.
-    - Excludes __MACOSX and .DS_Store entries.
+    - Excludes __MACOSX , .DS_Store, and Thumbs.db entries.
     - Replaces nested zips using files provided in nested_zips_to_replace.
     """
     
@@ -253,7 +330,7 @@ def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_repl
             for member in zf_in.infolist():
                 member_name = member.filename
                 
-                # A. Skip __MACOSX and .DS_Store
+                # A. Skip SYSTEM_FILES_TO_IGNORE
                 if True in [i in member_name for i in SYSTEM_FILES_TO_IGNORE] :
                     # Logging done in the main function
                     continue
@@ -273,7 +350,7 @@ def _rewrite_zip_for_cleaning(zip_fp: str, temp_zip_fp: str, nested_zips_to_repl
 
 def clean_zip_recursively(zip_fp: str):
     """
-    Recursively cleans a single zip file by removing __MACOSX and .DS_Store entries, 
+    Recursively cleans a single zip file by removing __MACOSX , .DS_Store, and Thumbs.db entries, 
     making it naked, and cleaning any nested zip files within.
     This process is done in-place by rewriting the zip file.
     """
@@ -289,7 +366,7 @@ def clean_zip_recursively(zip_fp: str):
         logger.error(f"ERROR: Archive is corrupted and cannot be read: {zip_filename}")
         return
 
-    # 2. Iterate and recursively clean nested zips and identify __MACOSX and .DS_Store
+    # 2. Iterate and recursively clean nested zips and identify __MACOSX , .DS_Store, and Thumbs.db
     nested_zips_to_replace: Dict[str, str] = {} # {member_name: path_to_cleaned_temp_zip}
     needs_rewrite = False
     
@@ -334,7 +411,7 @@ def clean_zip_recursively(zip_fp: str):
             # Create a temporary path for the rewritten archive
             temp_cleaned_zip = os.path.join(tempfile.gettempdir(), f"final_clean_{zip_filename}_{os.getpid()}")
             
-            # Perform the rewrite (skipping __MACOSX and .DS_Store, replacing nested zips)
+            # Perform the rewrite (skipping __MACOSX , .DS_Store, and Thumbs.db, replacing nested zips)
             _rewrite_zip_for_cleaning(zip_fp, temp_cleaned_zip, nested_zips_to_replace)
             
             # Replace the original zip file
@@ -546,13 +623,13 @@ def cli():
         help='Path to the zip file OR directory to start recursive extraction.'
     )
     parser_extract.add_argument(
-        '--remove-zips',
+        '--remove-archives',
         action='store_true',
-        help='Deletes the source zip files after successful extraction.'
+        help='Deletes the source compressed files after successful extraction.'
     )
     parser_extract.set_defaults(func=handle_extract_command)
     # Set the function to call when 'naked' is used
-    parser_zip.set_defaults(func=handle_naked_command)
+    parser_zip.set_defaults(func=handle_zip_command)
     
     # Parse the arguments and call the handler function
     args = parser.parse_args()
@@ -575,13 +652,13 @@ def handle_clean_command(args):
     main_cleaner(args.filepath, output_filepath=output_filepath, in_place=in_place)
 
 
-def handle_naked_command(args):
-    """Handler function for the 'naked' command."""
+def handle_zip_command(args):
+    """Handler function for the 'zip' command."""
     zip_appropriately(args.source_dir, args.target_dir)
 
 def handle_extract_command(args):
     """Handler function for the 'extract' command."""
-    extract_recursively(args.path, args.remove_zips)
+    extract_recursively(args.path, args.remove_archives)
 
 
 if __name__ == '__main__':
