@@ -103,7 +103,7 @@ def is_single_root_folder(archive_fp, ext=None):
         logger.error(f"Error inspecting {os.path.basename(archive_fp)}: {e}")
         return False
 
-def extract_zip(zip_fp, extraction_path, remove_zips, extracted=None):
+def extract_zip(zip_fp, extraction_path, remove_archives, extracted=None):
     with zf.ZipFile(zip_fp, "r") as f:
         for member in f.namelist():
             # Exclude SYSTEM_FILES_TO_IGNORE entries during extraction
@@ -118,7 +118,7 @@ def extract_zip(zip_fp, extraction_path, remove_zips, extracted=None):
     
     if extracted is not None:
         extracted.add(zip_fp)
-    if remove_zips:
+    if remove_archives:
         os.remove(zip_fp)
     
 
@@ -256,16 +256,16 @@ def extract_recursively_from_file(filepath, remove_archives=False):
     extract_recursively_in_folder(extraction_dir, remove_archives=remove_archives)
     
 
-def extract_recursively(path, remove_zips=False):
+def extract_recursively(path, remove_archives=False):
     """
     Main entry point: normalizes the path and calls the appropriate handler 
     based on whether the path is a file (ending in .zip) or a folder.
     """
     path = os.path.abspath(path)
     if path.lower().endswith(".zip"):
-        extract_recursively_from_file(path, remove_zips=remove_zips)
+        extract_recursively_from_file(path, remove_archives=remove_archives)
     else:
-        extract_recursively_in_folder(path, remove_zips=remove_zips)
+        extract_recursively_in_folder(path, remove_archives=remove_archives)
         
         
 def _make_naked(zip_fp: str, single_root_folder: str) -> bool:
@@ -623,13 +623,13 @@ def cli():
         help='Path to the zip file OR directory to start recursive extraction.'
     )
     parser_extract.add_argument(
-        '--remove-zips',
+        '--remove-archives',
         action='store_true',
-        help='Deletes the source zip files after successful extraction.'
+        help='Deletes the source compressed files after successful extraction.'
     )
     parser_extract.set_defaults(func=handle_extract_command)
     # Set the function to call when 'naked' is used
-    parser_zip.set_defaults(func=handle_naked_command)
+    parser_zip.set_defaults(func=handle_zip_command)
     
     # Parse the arguments and call the handler function
     args = parser.parse_args()
@@ -652,13 +652,13 @@ def handle_clean_command(args):
     main_cleaner(args.filepath, output_filepath=output_filepath, in_place=in_place)
 
 
-def handle_naked_command(args):
-    """Handler function for the 'naked' command."""
+def handle_zip_command(args):
+    """Handler function for the 'zip' command."""
     zip_appropriately(args.source_dir, args.target_dir)
 
 def handle_extract_command(args):
     """Handler function for the 'extract' command."""
-    extract_recursively(args.path, args.remove_zips)
+    extract_recursively(args.path, args.remove_archives)
 
 
 if __name__ == '__main__':
