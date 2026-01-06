@@ -60,7 +60,7 @@ Use one of these possible methods:
 
 2.  **Clone the Repository (Download the code):** This command downloads all the files from GitHub into a folder called nccr_cat_scripts which is placed within the folder you are in now.
     
-        git clone https://github.com/nccr_cat_scripts/nccr_cat_scripts.git
+        git clone https://github.com/nccr-catalysis-org/nccr_cat_scripts.git
         
     
 3.  **Navigate to the Directory:** Change into the newly created project folder.
