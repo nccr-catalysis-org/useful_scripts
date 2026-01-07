@@ -113,7 +113,7 @@ def process_recursively(path, formats=None, enc=None, inplace=False, dest=None):
                 os.makedirs(out_dir, exist_ok=True)
                 outfpath = os.path.join(out_dir, file)
             if file.endswith(formats):
-                process_file(fpath, enc=enc,inplace=inplace, dest=outfpath)
+                process_file(fpath, enc=enc,inplace=inplace, dest=outfpath, check_dest=False)
             elif not inplace:
                 sh.copy2(fpath, outfpath)
                 
