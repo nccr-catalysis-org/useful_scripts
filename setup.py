@@ -30,13 +30,17 @@ setup(
     long_description_content_type='text/plain', 
     
     # No external dependencies are currently required for zip_utils.py
-    install_requires=[],
+    install_requires=['numpy',
+        'pandas',
+        'openpyxl',
+        'rarfile',],
 
     # This section defines the command-line executables
     entry_points={
         'console_scripts': [
             'zip-utils = nccr_cat_scripts.zip_utils:cli',
             'tab-utils = nccr_cat_scripts.tabular_utils:cli',
+            'text-enc = nccr_cat_scripts.text_encoding:cli',
         ],
     },
     
