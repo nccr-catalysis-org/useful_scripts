@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nccr_cat_scripts"
+version = "0.1.0"
+description = "A collection of useful utilities for the general NCCR Catalysis community."
+readme = {file = "README.md", content-type = "text/markdown"}
+authors = [{name = "Niccolò Ricardi", email = "Niccolo.Ricardi@epfl.ch"}]
+license = {text = "GPL-3.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "openpyxl",
+    "rarfile",
+]
+
+[project.urls]
+Homepage = "https://github.com/nccr-catalysis-org/nccr_cat_scripts"
+
+[project.scripts]
+zip-utils = "nccr_cat_scripts.zip_utils:cli"
+tab-utils = "nccr_cat_scripts.tabular_utils:cli"
+text-enc = "nccr_cat_scripts.text_encoding:cli"
+
+[tool.setuptools]
+packages = ["nccr_cat_scripts"]

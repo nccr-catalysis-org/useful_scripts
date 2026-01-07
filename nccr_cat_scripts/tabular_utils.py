@@ -19,7 +19,8 @@ from typing import Any, Callable, Dict, List, Match, Optional, Pattern, Tuple
 import numpy as np
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.utils.cell import column_index_from_string, get_column_letter
+from openpyxl.helpers.cell import column_index_from_string, get_column_letter
+from nccr_cat_scripts import helpers
 
 # --- Logger Setup ---
 logger = logging.getLogger(__name__)
@@ -716,12 +717,6 @@ def _get_excel_writer_engine(out_format: str) -> str:
     else:
         raise InvalidFileFormatError(f"Unsupported Excel format for writing: {out_format}")
 
-def check_and_clean_folderpath(path):
-    assert not os.path.splitext(path)[1], f"It looks like you provided a filepath ({path}), while the code was expecting a folder path."
-    if path.endswith(os.path.sep):
-        path = f"{path}{os.path.sep}"
-    return path
-
 def write_tables(tables_per_sheet, source_file, out_format, destination, inplace, operation, operation_name):
     basename = os.path.splitext(source_file)[0]
     folder_name = os.path.split(source_file)[0]
@@ -781,7 +776,7 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
         logger.error(f"Skipping split for {file}: {e}")
         return
     if destination:
-        destination = check_and_clean_folderpath(destination)
+        destination = helpers.check_and_clean_folderpath(destination)
         
     tables_per_sheet: Dict[str, dict]  = {}
     multi_tables = False
@@ -894,7 +889,7 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destinat
         logger.error(f"Skipping split for {file}: {e}")
         return
     if destination:
-        destination = check_and_clean_folderpath(destination)
+        destination = helpers.check_and_clean_folderpath(destination)
         
     tables_per_sheet: Dict[str, dict]  = {}
     multi_tables = False
@@ -966,7 +961,7 @@ def convert_file(file, out_format=None, destination=None, inplace=False, sep=Non
             sh.copy2(file, os.path.join(destination, fname))
     if ext in WIDE_SEP_EXTENSIONS:
         if sep is None:
-            EXT_TO_SEP[ext]
+            sep = EXT_TO_SEP[ext]
         dfs = {basename: pd.read_csv(file, sep=sep, header=None)}
     elif ext in PROCESS_EXTENSIONS:
         dfs = pd.read_excel(file, sheet_name=None, header=None)
@@ -1082,7 +1077,7 @@ def split_tables_file(file, in_format=None, out_format=None, inplace=False, dest
         logger.error(f"Skipping split for {file}: {e}")
         return
     if destination:
-        destination = check_and_clean_folderpath(destination)
+        destination = helpers.check_and_clean_folderpath(destination)
     
     tables_per_sheet = {}
     for sheet_name, data in sheets.items():
@@ -1265,7 +1260,7 @@ def cli():
         help='Modify the source file(s) in-place.'
     )
     location_group_process.add_argument(
-        '--destination',
+        '--destination', '--dest',
         type=str,
         dest='destination',
         help='The destination file or directory for the output.'
@@ -1286,18 +1281,18 @@ def cli():
     
     # Mutually Exclusive Group for 'process' options
     process_group = parser_process.add_mutually_exclusive_group(required=True)
-    process_group.add_argument('--strip-only', action='store_true', help='Only strip whitespace from cell contents.')
-    process_group.add_argument('--unpad-only', action='store_true', help='Only unpad data to remove column spacing.')
+    process_group.add_argument('--strip-only', '--strip', action='store_true', help='Only strip whitespace from cell contents.')
+    process_group.add_argument('--unpad-only', '--unpad', action='store_true', help='Only unpad data to remove column spacing.')
     process_group.add_argument('--strip-unpad', action='store_true', help='Strip whitespace AND unpad data.')
-    process_group.add_argument('--vsplit-tables', action='store_true', help='Split vertical multitables.')
-    process_group.add_argument('--vsplit-into-two-columns-tables', action='store_true', help='Vertically split into two columns tables.')
-    process_group.add_argument('--hsplit-tables', action='store_true', help='Split horizontal multitables')
-    process_group.add_argument('--split-all-tables', action='store_true', help='Split all multitables')
+    process_group.add_argument('--vsplit-tables', '--vsplit', action='store_true', help='Split vertical multitables.')
+    process_group.add_argument('--vsplit-into-two-columns-tables', '--vsplit2col', action='store_true', help='Vertically split into two columns tables.')
+    process_group.add_argument('--hsplit-tables', '--hsplit', action='store_true', help='Split horizontal multitables')
+    process_group.add_argument('--split-all-tables', '--splitall', action='store_true', help='Split all multitables')
     
     # Mutually Exclusive Group for 'check' options
     check_group = parser_check.add_mutually_exclusive_group(required=True)
-    check_group.add_argument('--strip-only', action='store_true', help='Check only for cells needing strip.')
-    check_group.add_argument('--unpad-only', action='store_true', help='Check only for padding issues.')
+    check_group.add_argument('--strip-only', '--strip', action='store_true', help='Check only for cells needing strip.')
+    check_group.add_argument('--unpad-only', '--unpad', action='store_true', help='Check only for padding issues.')
     check_group.add_argument('--strip-unpad', action='store_true', help='Check for both strip and unpad issues.')
     check_group.add_argument('--multi-table', action='store_true', help='Check for multiple tables in a single file.')
 
@@ -1328,7 +1323,7 @@ def cli():
     )
     
     parser_convert.add_argument(
-        'separator',
+        '--separator', '--sep', '-s',
         dest="sep",
         help='The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. To explicitly specify space use "\s+"'
     )
@@ -1343,7 +1338,7 @@ def cli():
         help='Modify the source file(s) in-place.'
     )
     location_group_convert.add_argument(
-        '--destination',
+        '--destination', '--dest',
         type=str,
         dest='destination',
         help='The destination file or directory for the output.'
