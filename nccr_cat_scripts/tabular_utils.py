@@ -583,7 +583,6 @@ def check_file(full_path, ext, check_padding, check_strip, folder_path=None):
                     coords = detail['strip_cells'][:5]
                     more = f"... (+{len(detail['strip_cells']) - 5} more)" if len(detail['strip_cells']) > 5 else ""
                     logger.warning(f"    - Sheet '{sheet}': e.g., {', '.join(coords)}{more}")
-        logger.debug("done")
     return issues
 
 def check_recursively(folder_path: str, check_padding: bool, check_strip: bool):
@@ -1202,12 +1201,16 @@ def process_command(args):
 
 def convert_command(args):
     if not os.path.exists(args.source):
-        FileNotFoundError(f"Your source {args.source} does not exist!!")
+        # raise FileNotFoundError(f"Your source {args.source} does not exist!!")
+        logger.critical(f"Your source {args.source} does not exist!!")
+    sep = args.sep
+    if sep:
+        sep = args.sep.encode().decode("unicode_escape")
     if os.path.isfile(args.source):
-        convert_file(args.source, out_format=args.out_format, destination=args.destination, inplace=args.inplace, sep=args.sep)
+        convert_file(args.source, out_format=args.out_format, destination=args.destination, inplace=args.inplace, sep=sep)
     elif os.path.isdir(args.source):
         process_recursively(args.source, convert_file, destination=args.destination, inplace=args.inplace,
-                            out_format=args.out_format, format_to_process=args.in_format, sep=args.sep)
+                            out_format=args.out_format, format_to_process=args.in_format, sep=sep)
 
 def cli():
     """Configures and runs the command line interface."""
@@ -1329,7 +1332,13 @@ def cli():
     parser_convert.add_argument(
         '--separator', '--sep', '-s',
         dest="sep",
-        help='The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. To explicitly specify space use "\s+"'
+        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. Some ways to explicitly specify tricky separators:
+        " " \N{RIGHTWARDS ARROW} single spaces only;
+        " +" \N{RIGHTWARDS ARROW} one or more spaces, but not tab;
+        "\t" \N{RIGHTWARDS ARROW} single tabs only, but not spaces;
+        "\s" \N{RIGHTWARDS ARROW} single spaces or tabs;
+        "\s+" \N{RIGHTWARDS ARROW} one or more tab or spaces (careful, this could join cells if you have contiguous empty ones)
+        '''
     )
 
     # 2. Mutually Exclusive Group for output location (Required for PROCESS)

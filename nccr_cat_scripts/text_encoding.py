@@ -68,7 +68,6 @@ def decode_scientific(file_path, enc=None):
 def process_file(path, enc=None, inplace=None, dest=None, check_dest=True):
     try:
         encoding, decoded_text = decode_scientific(path, enc=enc)
-        logger.debug(f"encoding: {encoding}")
     except EncodingMismatchError as e:
         logger.error(e)
     except ValueError as e:
