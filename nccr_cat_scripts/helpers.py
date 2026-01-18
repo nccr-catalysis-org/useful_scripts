@@ -8,7 +8,7 @@ Created on Wed Jan  7 16:29:52 2026
 
 import os
 
-def is_file(path):
+def isfile(path):
     if os.path.exists(path):
         return os.path.isfile(path)
     else:

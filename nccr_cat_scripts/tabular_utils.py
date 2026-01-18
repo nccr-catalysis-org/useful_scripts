@@ -1124,10 +1124,10 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
         **kwargs: Additional keyword arguments passed to file_func.
     """
     path = os.path.abspath(path)
-    is_dir: bool = os.path.isdir(path)
-    is_file: bool = os.path.isfile(path)
 
-    if is_dir:
+    if os.path.isdir(path):
+        if destination:
+            destination = helpers.check_and_clean_folderpath()
         source_fol: str = path
         for fol, subfols, files in os.walk(source_fol):
             if destination:
@@ -1149,13 +1149,20 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
                         logger.error(f"Failed to process {file_path}: {e}")
                 elif not inplace:
                     sh.copy2(file_path, os.path.join(correspfol, file))
-    elif is_file:
+    elif os.path.isfile(path):
         if not path.lower().endswith(TABULAR_EXTENSIONS):
              logger.error(f"File {path} is not a supported tabular format ({', '.join(TABULAR_EXTENSIONS)}).")
              return
         logger.info(f"Processing single file: {path}")
+        if helpers.isdir(destination):
+            destfol, destfbname = destination, None
+        elif helpers.isfile(destination):
+           destfol, destfname = os.path.split(destination)
+           destfbname, _ = os.path.splitext(destfname)
+           ext = _[1:]
+           assert ext == out_format, "The destination is a filepath that does not match the desired output format!!"
         try:
-            file_func(path, destination=destination,
+            file_func(path, destfol=destfol, destfbname=destfbname,
                       out_format=out_format, inplace=inplace,
                       **kwargs)
         except Exception as e:
@@ -1222,7 +1229,6 @@ def process_command(args):
             split_func = hsplit_tables
         elif args.split_all_tables:
             split_func = split_tables_file
-    
         if os.path.isfile(args.source):
             if args.in_format:
                 logger.info("You passed a --in-format argument but this will be ignored since your source is a file. The extension will be detected from the filename.")
@@ -1239,14 +1245,14 @@ def convert_command(args):
     if sep:
         sep = args.sep.encode().decode("unicode_escape")
     if os.path.isfile(args.source):
-        if helpers.is_dir(args.destination):
+        if helpers.isdir(args.destination):
             convert_file(args.source, out_format=args.out_format, destfol=args.destination, inplace=args.inplace, sep=sep)
-        elif helpers.is_file(args.destination):
+        elif helpers.isfile(args.destination):
             destfol, destfname = os.path.split(args.destination)
             destfbname, _ = os.path.splitext(destfname)
             ext = _[1:]
             assert ext == args.out_format, "The destination is a filepath that does not match the desired output format!!"
-            convert_file(args.source, out_format=args.out_format, destfol=args.destination,
+            convert_file(args.source, out_format=args.out_format, destfol=destfol,
                          destfbname=destfbname, inplace=args.inplace, sep=sep)
     elif os.path.isdir(args.source):
         process_recursively(args.source, convert_file, destfol=args.destination, inplace=args.inplace,
