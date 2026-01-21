@@ -5,15 +5,19 @@ Created on Thu Nov 20 14:53:00 2025
 
 @author: nr
 """
-import zipfile as zf
-import tarfile
-import rarfile
-import os
-import logging
-import tempfile
-import shutil
-from typing import Dict, Optional
 import argparse
+import importlib
+import logging
+import os
+import shutil
+import sys
+import tarfile
+import tempfile
+import zipfile as zf
+from typing import Dict, Optional
+
+
+import rarfile
 
 # --- Logger Setup (Ensures clean output without '__main__') ---
 logger = logging.getLogger(__name__)
@@ -653,6 +657,15 @@ def cli():
     parser_extract.set_defaults(func=handle_extract_command)
     # Set the function to call when 'naked' is used
     parser_zip.set_defaults(func=handle_zip_command)
+    
+    if importlib.util.find_spec("argcomplete"):
+        import argcomplete
+        logger.info("running argcomplete.autocomplete(parser)")
+        argcomplete.autocomplete(parser)
+    
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
     
     # Parse the arguments and call the handler function
     args = parser.parse_args()

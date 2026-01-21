@@ -6,6 +6,7 @@ Created on Tue Jan  6 11:36:28 2026
 @author: nr
 """
 import argparse
+import importlib
 import logging
 import os
 import re
@@ -178,6 +179,15 @@ def cli():
     parser_convert.add_argument('--enc', type=str, help="Expected encoding. Use it if you know it, it will make the conversion faster and more robust.")
     parser_convert.add_argument('--formats', type=str, default=".txt", help="Comma-separated extensions")
 
+    if importlib.util.find_spec("argcomplete"):
+        import argcomplete
+        logger.info("running argcomplete.autocomplete(parser)")
+        argcomplete.autocomplete(parser)
+    
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+        
     args = parser.parse_args()
     numeric_level = getattr(logging, args.log.upper(), logging.INFO)
     logger.setLevel(numeric_level)

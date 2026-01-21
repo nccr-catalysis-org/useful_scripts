@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# PYTHON_ARGCOMPLETE_OK
 """
 Created on Wed Nov 26 16:44:53 2025
 
@@ -1491,18 +1492,6 @@ def cli():
     )
     
     parser_convert.add_argument(
-        '--separator', '--sep', '-s',
-        dest="sep",
-        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. Some ways to explicitly specify tricky separators:
-        " " \N{RIGHTWARDS ARROW} single spaces only;
-        " +" \N{RIGHTWARDS ARROW} one or more spaces, but not tab;
-        "\t" \N{RIGHTWARDS ARROW} single tabs only, but not spaces;
-        "\s" \N{RIGHTWARDS ARROW} single spaces or tabs;
-        "\s+" \N{RIGHTWARDS ARROW} one or more tab or spaces (careful, this could join cells if you have contiguous empty ones)
-        '''
-    )
-    
-    parser_convert.add_argument(
         '--discard-non-tabular',
         action="store_false",
         dest="keep_nontabular",
@@ -1523,11 +1512,29 @@ def cli():
         dest='destination',
         help='The destination file or directory for the output.'
     )
+    
+    parser_convert.add_argument(
+        '--separator', '--sep', '-s',
+        dest="sep",
+        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. Some ways to explicitly specify tricky separators:
+        " " \N{RIGHTWARDS ARROW} single spaces only;
+        " +" \N{RIGHTWARDS ARROW} one or more spaces, but not tab;
+        "\t" \N{RIGHTWARDS ARROW} single tabs only, but not spaces;
+        "\s" \N{RIGHTWARDS ARROW} single spaces or tabs;
+        "\s+" \N{RIGHTWARDS ARROW} one or more tab or spaces (careful, this could join cells if you have contiguous empty ones);
+        "\;" \N{RIGHTWARDS ARROW} for semicolon ("\" escapes the ";" to prevent your shell from interpreting as the end of a command)
+        '''
+    )
+    
+    if importlib.util.find_spec("argcomplete"):
+        import argcomplete
+        logger.info("running argcomplete.autocomplete(parser)")
+        argcomplete.autocomplete(parser)
+    
     # Parse arguments and call the corresponding function
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
-
     args = parser.parse_args()
     numeric_level = getattr(logging, args.log.upper(), logging.INFO)
     logger.setLevel(numeric_level)
