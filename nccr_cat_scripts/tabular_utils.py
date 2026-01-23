@@ -1277,7 +1277,7 @@ def check_command(args):
         raise FileNotFoundError(f"Your source {args.source} does not exist!!")
     if os.path.isfile(args.source):
         ext = os.path.splitext(args.source.lower())[1][1:]
-    frmt_to_check = args.in_formats.split(",") if args.in_formats else None
+    frmt_to_check =  [helpers.harmonize_ext(i) for i in args.in_formats.split(",")] if args.in_formats else None
     # Logic for the mutually exclusive options
     if any([args.strip_only, args.unpad_only, args.strip_unpad]):
         check_padding = False if args.strip_only else True
@@ -1302,7 +1302,7 @@ def process_command(args):
         raise FileNotFoundError(f"Your source {args.source} does not exist!!")
     if os.path.isfile(args.source):
         ext = os.path.splitext(args.source.lower())[1][1:]
-    in_formats = args.in_formats.split(",") if args.in_formats else None
+    in_formats = [helpers.harmonize_ext(i) for i in args.in_formats.split(",")] if args.in_formats else None
     # Logic for the mutually exclusive options
     if any([args.strip_only, args.unpad_only, args.strip_unpad]):
         if args.out_format:
@@ -1409,7 +1409,7 @@ def cli():
         '--in-formats',
         type=str,
         dest='in_formats',
-        help=f'The extension(s) to process if the source is a folder. Provide a comma separated list (e.g. "csv,tsv") but do not use space after the comma.  If nothing is provided, it will process {TABULAR_EXTENSIONS}.'
+        help=f'The extension(s) to process if the source is a folder. Provide a comma separated list (e.g. "csv,tsv") either without using space or wrapping it in quotation marks.  If nothing is provided, it will process {TABULAR_EXTENSIONS}.'
     )
 
     # 2. Mutually Exclusive Group for output location (Required for PROCESS)

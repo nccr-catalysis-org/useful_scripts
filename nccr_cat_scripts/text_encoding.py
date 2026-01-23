@@ -40,7 +40,7 @@ def decode_scientific(file_path, enc=None):
     # \u0080-\u00FF: Latin-1 Supplement (µ, °, é, etc.)
     # \u0370-\u03FF: Greek and Coptic characters
     # \s: Whitespace (newlines, tabs)
-    valid_pattern = re.compile(r'^[\u0000-\u007F\u0080-\u00FF\u0370-\u03FF\s]*$')
+    valid_pattern = re.compile(r'^[\u0000-\u007F\u0080-\u00FF\u0370-\u03FF\u2000-\u206F\u2100-\u214F\u2200-\u22FF\s]*$')
 
     with open(file_path, 'rb') as f:
         raw_data = f.read()
@@ -124,7 +124,7 @@ def run_conversion(args):
     Validation and dispatch logic for the 'convert' command.
     """
     # 1) Check for contradictory arguments
-    if args.inplace and args.dest:
+    if args.inplace and args.destination:
         logger.error("Contradictory arguments: You cannot use --inplace and --dest together.")
         sys.exit(1)
 
@@ -138,14 +138,14 @@ def run_conversion(args):
             formats=format_tuple,
             enc=args.enc,
             inplace=args.inplace,
-            dest=args.dest
+            dest=args.destination
         )
     elif os.path.isfile(args.path):
         process_file(
             path=args.path,
             enc=args.enc,
             inplace=args.inplace,
-            dest=args.dest
+            dest=args.destination
         )
     else:
         logger.error(f"The path '{args.path}' does not exist.")
@@ -175,13 +175,12 @@ def cli():
     parser_convert.set_defaults(func=run_conversion)
     parser_convert.add_argument('path', help="Path to the directory or file to process")
     parser_convert.add_argument('--inplace', action='store_true', help="Overwrite original files")
-    parser_convert.add_argument('--dest', type=str, help="Destination path/directory")
+    parser_convert.add_argument('--destination', '--dest', '-d', type=str, help="Destination path/directory")
     parser_convert.add_argument('--enc', type=str, help="Expected encoding. Use it if you know it, it will make the conversion faster and more robust.")
-    parser_convert.add_argument('--formats', type=str, default=".txt", help="Comma-separated extensions")
+    parser_convert.add_argument('--formats', type=str, default=".txt", help="Comma-separated list of extensions to process (e.g. 'txt,csv'). You can either use no space or wrap the list in quotation marks.")
 
     if importlib.util.find_spec("argcomplete"):
         import argcomplete
-        logger.info("running argcomplete.autocomplete(parser)")
         argcomplete.autocomplete(parser)
     
     if len(sys.argv) == 1:
