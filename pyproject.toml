@@ -29,6 +29,9 @@ dependencies = [
     "rarfile",
 ]
 
+[project.optional-dependencies]
+completion = ["argcomplete"]
+
 [project.urls]
 Homepage = "https://github.com/nccr-catalysis-org/nccr_cat_scripts"
 

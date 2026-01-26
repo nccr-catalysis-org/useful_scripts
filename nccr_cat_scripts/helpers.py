@@ -6,9 +6,14 @@ Created on Wed Jan  7 16:29:52 2026
 @author: nr
 """
 
+from collections.abc import Collection
 import os
 
-def is_file(path):
+
+def islistlike(obj):
+    return isinstance(obj, Collection) and not isinstance(obj, (str, bytes))
+
+def isfile(path):
     if os.path.exists(path):
         return os.path.isfile(path)
     else:
@@ -25,3 +30,8 @@ def check_and_clean_folderpath(path):
     if not path.endswith(os.path.sep):
         path = f"{path}{os.path.sep}"
     return path
+
+def harmonize_ext(ext):
+    if ext.startswith("."):
+        return ext[1:]
+    return ext
