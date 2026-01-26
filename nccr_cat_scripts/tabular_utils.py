@@ -884,7 +884,7 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False,
             sh.copy2(file, destfol)
         return
     
-    out_format = in_format if out_format is None else out_format
+    out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "vsplit", "split tables vertically")
 
 
@@ -956,7 +956,7 @@ def vsplit_into_two_colum_tables(file, in_format=None, out_format=None, inplace=
         return
     
     # 3. Handle Output Path
-    out_format = in_format if out_format is None else out_format
+    out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "2col_split", "split into 2 column tables")
     
 def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destfol=None, destfbname=None):
@@ -1021,7 +1021,7 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destfol=
             sh.copy2(file, destfol)
         return
     
-    out_format = in_format if out_format is None else out_format
+    out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "hsplit", "split tables horizontally")
 
 def read_sep_tab(file, sep):
@@ -1040,13 +1040,20 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
                  inplace=False, sep=None, keep_nontabular=True):
     if out_format is None:
         raise ValueError("You must select an output format")
-    if destfol:
-        os.makedirs(destfol, exist_ok=True)
-    ext = os.path.splitext(file.lower())[1][1:]
     folder_path, fname = os.path.split(file)
-    basename = destfbname if destfbname else fname[:-(len(ext)+1)]
+    
     if destfol is None:
         destfol = folder_path
+    else:
+        os.makedirs(destfol, exist_ok=True)
+        
+    ext = os.path.splitext(file.lower())[1][1:]
+    if ext == out_format and sep is None:  # no point in processing the file
+        if inplace:
+            return
+        sh.copy2(file, destfol)
+    
+    basename = destfbname if destfbname else fname[:-(len(ext)+1)]
     has_comment_lines = False
     if ext in WIDE_SEP_EXTENSIONS:
         if sep is None:
@@ -1080,15 +1087,12 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
     elif out_format in PROCESS_EXTENSIONS:
         if has_comment_lines and keep_nontabular:
             raise OptionNotAllowed("Non tabular data in Excel files is not allowed! Nontabular data in csv/tsv is deprecated but tolerated")
-        for sheet_name, df in dfs.items():
-            engine = _get_excel_writer_engine(out_format)
-            addendum = "" if len(dfs) == 1 else f"_{sheet_name}"
-            t = os.path.join(out_folder, f"{basename}{addendum}.{out_format}")
-            logger.info(t)
-            with pd.ExcelWriter(os.path.join(out_folder, f"{basename}{addendum}.{out_format}"), engine=engine) as writer:
-                for sheet_name, df in dfs.items():
-                    new_sheet_name = _safe_sheet_name(sheet_name)
-                    df.to_excel(writer, sheet_name=new_sheet_name, index=False, header=False)
+        engine = _get_excel_writer_engine(out_format)
+        logger.info(os.path.join(out_folder, f"{basename}.{out_format}"))
+        with pd.ExcelWriter(os.path.join(out_folder, f"{basename}.{out_format}"), engine=engine) as writer:
+            for sheet_name, df in dfs.items():
+                new_sheet_name = _safe_sheet_name(sheet_name)
+                df.to_excel(writer, sheet_name=new_sheet_name, index=False, header=False)
     else:
         raise InvalidFileFormatError("Unsupported output format {out_format}")
     if inplace and ext != out_format:
@@ -1194,7 +1198,7 @@ def split_tables_file(file, in_format=None, out_format=None, inplace=False,
     if all([len(v) == 1 for k, v in tables_per_sheet.items()]):
         if destfol:
             sh.copy2(file, destfol)
-    out_format = in_format if out_format is None else out_format
+    out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "splitall", "split all tables")
     
 def process_recursively(path: str, file_func: Callable[..., None], destination=None,
@@ -1221,8 +1225,8 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
         
     if os.path.isdir(path):
         if destination:
-            destination = helpers.check_and_clean_folderpath()
-        source_fol: str = path
+            destination = helpers.check_and_clean_folderpath(destination)
+        source_fol: str = helpers.check_and_clean_folderpath(path)
         for fol, subfols, files in os.walk(source_fol):
             if destination:
                 correspfol = fol.replace(source_fol, destination)
@@ -1315,7 +1319,7 @@ def process_command(args):
         elif os.path.isdir(args.source):
             unpad_strip_recursively(args.source, dest, unpad, strip_text, in_formats=in_formats)
     else:
-        out_format = helpers.harmonize_ext(args.out_format)
+        out_format = helpers.harmonize_ext(args.out_format) if args.out_format else None
         if args.vsplit_tables:
             split_func = vsplit_tables
         elif args.vsplit_into_two_columns_tables:
@@ -1327,13 +1331,24 @@ def process_command(args):
         if os.path.isfile(args.source):
             if args.in_formats:
                 logger.info("You passed a --in-format argument but this will be ignored since your source is a file. The extension will be detected from the filename.")
-            split_func(args.source, in_format=ext, out_format=out_format, inplace=args.inplace, destination=args.destination)
+            if args.destination:
+                if helpers.isdir(args.destination):
+                    destfol, destfbname = args.destination, None
+                elif helpers.isfile(args.destination):
+                    destfol, destfname = os.path.split(args.destination)
+                    destfbname, _ = os.path.splitext(destfname)
+                    ext = _[1:]
+                    if args.out_format:
+                        assert ext == helpers.harmonize_ext(args.out_format), "The destination is a filepath that does not match the desired output format!!"
+            else:
+                destfol, destfbname = None, None
+            split_func(args.source, in_format=ext, out_format=out_format, inplace=args.inplace,
+                       destfol=destfol, destfbname=destfbname)
         elif os.path.isdir(args.source):
             process_recursively(args.source, split_func, out_format=out_format,
                                 formats_to_process=in_formats, destination=args.destination, inplace=args.inplace)
 
 def convert_command(args):
-    logger.debug(f"keep_nontabular: {args.keep_nontabular}")
     if not os.path.exists(args.source):
         logger.critical(f"Your source {args.source} does not exist!!")
         raise FileNotFoundError(f"Your source {args.source} does not exist!!")
@@ -1342,23 +1357,28 @@ def convert_command(args):
         sep = args.sep.encode().decode("unicode_escape")
     if os.path.isfile(args.source):
         try:
-            if helpers.isdir(args.destination):
-                convert_file(args.source, out_format=args.out_format, destfol=args.destination,
-                             inplace=args.inplace, sep=sep, keep_nontabular=args.keep_nontabular)
-            elif helpers.isfile(args.destination):
-                destfol, destfname = os.path.split(args.destination)
-                destfbname, _ = os.path.splitext(destfname)
-                ext = _[1:]
-                assert ext == args.out_format, "The destination is a filepath that does not match the desired output format!!"
-                convert_file(args.source, out_format=args.out_format, destfol=destfol,
-                             destfbname=destfbname, inplace=args.inplace, sep=sep,
-                             keep_nontabular=args.keep_nontabular)
-            logger.info(f"Successfully converted {args.source}")
+            if args.destination:
+                if helpers.isdir(args.destination):
+                    convert_file(args.source, out_format=args.out_format, destfol=args.destination,
+                                 inplace=args.inplace, sep=sep, keep_nontabular=args.keep_nontabular)
+                elif helpers.isfile(args.destination):
+                    destfol, destfname = os.path.split(args.destination)
+                    destfbname, _ = os.path.splitext(destfname)
+                    ext = _[1:]
+                    assert ext == helpers.harmonize_ext(args.out_format), "The destination is a filepath that does not match the desired output format!!"
+                    convert_file(args.source, out_format=args.out_format, destfol=destfol,
+                                 destfbname=destfbname, inplace=args.inplace, sep=sep,
+                                 keep_nontabular=args.keep_nontabular)
+            elif args.inplace:
+                convert_file(args.source, out_format=args.out_format, inplace=True,
+                             sep=sep, keep_nontabular=args.keep_nontabular)
+            else:
+                raise ValueError("It seems neither inplace nor destination were defined.")
         except Exception as e:
             logger.critical(f"Error encountered while processing {args.source}:\n {e}")
     elif os.path.isdir(args.source):
-        process_recursively(args.source, convert_file, destfol=args.destination, inplace=args.inplace,
-                            out_format=args.out_format, format_to_process=args.in_formats, sep=sep)
+        process_recursively(args.source, convert_file, destination=args.destination, inplace=args.inplace,
+                            out_format=args.out_format, formats_to_process=args.in_formats, sep=sep)
 
 def cli():
     """Configures and runs the command line interface."""
@@ -1466,7 +1486,7 @@ def cli():
 
     parser_convert = subparsers.add_parser(
         'convert', 
-        help='Just convert tabular data files between different extesions and/or change the separator.'
+        help='Convert tabular data files between different extesions and/or change the separator.'
     )
     parser_convert.set_defaults(func=convert_command)
     
@@ -1516,19 +1536,12 @@ def cli():
     parser_convert.add_argument(
         '--separator', '--sep', '-s',
         dest="sep",
-        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. Some ways to explicitly specify tricky separators:
-        " " \N{RIGHTWARDS ARROW} single spaces only;
-        " +" \N{RIGHTWARDS ARROW} one or more spaces, but not tab;
-        "\t" \N{RIGHTWARDS ARROW} single tabs only, but not spaces;
-        "\s" \N{RIGHTWARDS ARROW} single spaces or tabs;
-        "\s+" \N{RIGHTWARDS ARROW} one or more tab or spaces (careful, this could join cells if you have contiguous empty ones);
-        "\;" \N{RIGHTWARDS ARROW} for semicolon ("\" escapes the ";" to prevent your shell from interpreting as the end of a command)
+        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. For space or semicolon, wrap it in quotation marks.
         '''
     )
     
     if importlib.util.find_spec("argcomplete"):
         import argcomplete
-        logger.info("running argcomplete.autocomplete(parser)")
         argcomplete.autocomplete(parser)
     
     # Parse arguments and call the corresponding function
