@@ -885,9 +885,65 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False,
         return
     
     out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
+    logger.debug(f"inside, {destfol}, {destfbname}")
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "vsplit", "split tables vertically")
 
-
+def split_tables_to_multiindex(file, in_format=None, out_format=None, inplace=False,
+                  destfol=None, destfbname=None):
+    """
+    Splits a file containing multiple tables separated by empty columns into 
+    individual sheets (if XLSX/XLS) or separate CSV files.
+    """
+    try:
+        sheets, in_format = read_sheets(file, frmt=in_format)
+    except InvalidFileFormatError as e:
+        logger.error(f"Skipping split for {file}: {e}")
+        return
+        
+    tables_per_sheet: Dict[str, dict]  = {}
+    multi_index = False
+    for sheet_name, data in sheets.items():
+        df, original_columns = data["df"], data["columns"]
+        start = 0
+        tables: List[pd.DataFrame] = []
+        
+        # 1. Identify table boundaries (columns that are all NaN)
+        empty_cols_indices = [n for n, col in enumerate(df.columns) if df[col].isna().all()]
+        if not empty_cols_indices:
+            logger.info(f"No multiple tables found in sheet {sheet_name} in {file} to split.")
+            tables_per_sheet[sheet_name] = {sheet_name: df}
+            continue
+        multi_index = True
+        table_boundaries = empty_cols_indices + [len(df.columns)]
+        
+        # 2. Extract tables
+        for n, block_end in enumerate(table_boundaries):
+            end = block_end
+            if end > start:  # Extract table if block is not empty
+                table = df.iloc[:, start:end].copy()
+                if not any(original_columns[start:end]):  # empty header line
+                    raise ValueError("No labels for first index level in {file}, columns {start} to {end}")
+                elif sum([bool(i) for i in original_columns[start:end]]) == 1:  # table title and column headers
+                    key = [i for i in original_columns[start:end] if i][0]
+                    table.columns = [key for i in table.columns]
+                elif len(set(original_columns[start:end])) == 1:
+                    table.columns = original_columns[start:end]
+                else:
+                    raise ValueError("The labels of columns do not match the splitting of tables")
+                tables.append(table)
+            start = block_end + 1
+        new_df = pd.concat(tables, axis=1)
+        tables_per_sheet[sheet_name] = {sheet_name: new_df}
+    if not multi_index:
+        msg_bit = "leaving it unchanged" if inplace else "just copying it"
+        logger.info(f"No multiple tables at all in {file}, {msg_bit}")
+        if destfol:  # no point in re-writing the file
+            sh.copy2(file, destfol)
+        return
+    
+    out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
+    write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "multidx", "turned split tables into MultiIndex")
+    
 def vsplit_into_two_colum_tables(file, in_format=None, out_format=None, inplace=False,
                                  destfol=None, destfbname=None):
     """
@@ -958,7 +1014,7 @@ def vsplit_into_two_colum_tables(file, in_format=None, out_format=None, inplace=
     # 3. Handle Output Path
     out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "2col_split", "split into 2 column tables")
-    
+
 def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destfol=None, destfbname=None):
     """
     Splits a file containing multiple tables separated by empty columns into 
@@ -1328,6 +1384,8 @@ def process_command(args):
             split_func = hsplit_tables
         elif args.split_all_tables:
             split_func = split_tables_file
+        elif args.split_to_multiindex:
+            split_func = split_tables_to_multiindex
         if os.path.isfile(args.source):
             if args.in_formats:
                 logger.info("You passed a --in-format argument but this will be ignored since your source is a file. The extension will be detected from the filename.")
@@ -1342,6 +1400,8 @@ def process_command(args):
                         assert ext == helpers.harmonize_ext(args.out_format), "The destination is a filepath that does not match the desired output format!!"
             else:
                 destfol, destfbname = None, None
+            logger.debug(destfol)
+            logger.debug(destfbname)
             split_func(args.source, in_format=ext, out_format=out_format, inplace=args.inplace,
                        destfol=destfol, destfbname=destfbname)
         elif os.path.isdir(args.source):
@@ -1476,6 +1536,7 @@ def cli():
     process_group.add_argument('--vsplit-into-two-columns-tables', '--vsplit2col', action='store_true', help='Vertically split into two columns tables.')
     process_group.add_argument('--hsplit-tables', '--hsplit', action='store_true', help='Split horizontal multitables')
     process_group.add_argument('--split-all-tables', '--splitall', action='store_true', help='Split all multitables')
+    process_group.add_argument('--split-to-multiindex', '--multiindex', '--multi-idx', action='store_true', help='Turn multi-tables into a MultiIndex')
     
     # Mutually Exclusive Group for 'check' options
     check_group = parser_check.add_mutually_exclusive_group(required=True)
