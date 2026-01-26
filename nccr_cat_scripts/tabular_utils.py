@@ -772,8 +772,7 @@ def _get_excel_writer_engine(out_format: str) -> str:
 
 def write_tables(tables_per_sheet, source_file, out_format, destfol, destfbname,
                  inplace, operation, operation_name):
-    basename = destfbname if destfbname else os.path.splitext(os.path.split(source_file)[0])[0]
-    basefpath = os.path.splitext(source_file)[0]
+    basename = destfbname if destfbname else f"{os.path.splitext(os.path.split(source_file)[1])[0]}_{operation}"
     source_folder = os.path.split(source_file)[0]
     out_folder = destfol if destfol else source_folder
     if destfol:
@@ -783,20 +782,17 @@ def write_tables(tables_per_sheet, source_file, out_format, destfol, destfbname,
         if inplace:
             out_file = source_file
         else:
-            if destfol:
-                out_file = os.path.join(destfol, f"{basename}_{operation}.{out_format}")
-            else:
-                out_file = f"{basefpath}_{operation}.{out_format}"
+            out_file = os.path.join(out_folder, f"{basename}.{out_format}")
         
         # Ensure the source_filename is not too long
         if len(out_file) > 218: 
              logger.warning(f"Output source_filename {out_file} is too long, truncating.")
-             tokeep = len(f"_{operation}.{out_format}")
+             tokeep = len(f"_{operation}.{out_format}") if not destfbname else len(f".{out_format}")
              if len(out_folder) + len(tokeep) >= 218:
                  logger.critical("""Cannot write output because the resulting filepath would be more than 218 character(max allowed by Excel)! 
                                  Find a way to shorten your filepath (shorter folder/filenames, less nesting). Filepath: {source_file}""")
                  raise ValueError
-             out_file = os.path.join(out_folder, f"{basename[:218-(len(out_folder)+tokeep+1)]}_{operation}.{out_format}")
+             out_file = os.path.join(out_folder, f"{basename[:218-(len(out_folder)+tokeep+1)]}.{out_format}")
              if inplace:
                  logger.critical("""Cannot write output because the resulting filepath would be more than 218 character(max allowed by Excel)! 
                                  Find a way to shorten your filepath (shorter folder/filenames, less nesting). Filepath: {source_file}""")
@@ -822,7 +818,7 @@ def write_tables(tables_per_sheet, source_file, out_format, destfol, destfbname,
         for sheet_name, tables in tables_per_sheet.items():
             for k, table in tables.items():
                 safe_k = _safe_sheet_name(k)
-                out_file = os.path.join(out_folder, f"{basename}_{operation}_{safe_k}.{out_format}")
+                out_file = os.path.join(out_folder, f"{basename}_{safe_k}.{out_format}")
                 table.to_csv(out_file, index=False, header=True, sep=EXT_TO_SEP[out_format])
         logger.info(f"Successfully {operation_name} from {source_file} into multiple {out_format.upper()}")
         if inplace:
@@ -885,7 +881,6 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False,
         return
     
     out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
-    logger.debug(f"inside, {destfol}, {destfbname}")
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "vsplit", "split tables vertically")
 
 def split_tables_to_multiindex(file, in_format=None, out_format=None, inplace=False,
@@ -1400,8 +1395,6 @@ def process_command(args):
                         assert ext == helpers.harmonize_ext(args.out_format), "The destination is a filepath that does not match the desired output format!!"
             else:
                 destfol, destfbname = None, None
-            logger.debug(destfol)
-            logger.debug(destfbname)
             split_func(args.source, in_format=ext, out_format=out_format, inplace=args.inplace,
                        destfol=destfol, destfbname=destfbname)
         elif os.path.isdir(args.source):
