@@ -834,7 +834,6 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False,
     individual sheets (if XLSX/XLS) or separate CSV files.
     """
     try:
-        logger.debug(f"in_format {in_format}")
         sheets, in_format = read_sheets(file, frmt=in_format)
     except InvalidFileFormatError as e:
         logger.error(f"Skipping split for {file}: {e}")
@@ -883,7 +882,6 @@ def vsplit_tables(file, in_format=None, out_format=None, inplace=False,
         return
     
     out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
-    logger.debug(tables_per_sheet)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "vsplit", "split tables vertically")
 
 def split_tables_to_multiindex(file, in_format=None, out_format=None, inplace=False,
@@ -1081,8 +1079,11 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destfol=
 def read_sep_tab(file, sep):
     with open(file, "r") as f:
         lines = f.readlines()
-    for n, line in enumerate(lines):
-        if sep in line:
+    max_ = max(15, len(lines))
+    counts = [line.count(sep) for line in lines[:max_]]
+    nsep = max(counts)
+    for n in range(max_):
+        if counts[n] == nsep:
             first = n
             break
     headerlines, datalines = lines[:first], lines[first:]
@@ -1109,9 +1110,14 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
     
     basename = destfbname if destfbname else fname[:-(len(ext)+1)]
     has_comment_lines = False
-    if ext in WIDE_SEP_EXTENSIONS:
+    if ext in PROCESS_EXTENSIONS:
+        dfs = pd.read_excel(file, sheet_name=None, header=None)
+    else:
         if sep is None:
-            sep = EXT_TO_SEP[ext]
+            if ext in WIDE_SEP_EXTENSIONS:
+                sep = EXT_TO_SEP[ext]
+            else:
+                raise ValueError("No separator was provided and no known separator is available for {ext}")
         try:
             dfs = {basename: pd.read_csv(file, sep=sep, header=None)}
         except:
@@ -1121,13 +1127,13 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
                 dfs = {basename: df}
             except:
                 raise FileNotUnderstoodError(f"Could not understand the data in file: {file}")
-    elif ext in PROCESS_EXTENSIONS:
-        dfs = pd.read_excel(file, sheet_name=None, header=None)
+    
     out_folder = folder_path if inplace else destfol
     if out_format in STRICT_SEP_EXTENSIONS:
         if has_comment_lines and keep_nontabular:
-            logger.critical(""""Writing non-tabular data as comments marked with '#'.
-                            Make sure to indicate that in your Readme file (e.g. {out_format} files contain comments marked with '#', to read use pd.read_csv(file, comment='#')""")
+            bit = ", sep='\t'" if "tsv" else ""
+            logger.critical(f""""Writing non-tabular data as comments marked with '#'.
+                            Make sure to indicate that in your Readme file (e.g. {out_format} files contain comments marked with '#', to read use pd.read_csv(file, comment='#'{bit})""")
             outfile = os.path.join(out_folder, f"{basename}.{out_format}")
             with open(outfile, "w", encoding="utf-8") as f:
                 f.write(non_tab_header)
@@ -1137,13 +1143,14 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
                 logger.critical("There is non-tabular data in this file. Beware that it will not be written to the output file, as per your request")
             for sheet_name, df in dfs.items():
                 addendum = "" if len(dfs) == 1 else f"_{sheet_name}"
-                df.to_csv(os.path.join(out_folder, f"{basename}{addendum}.{out_format}"), header=False, index=False, sep=EXT_TO_SEP[out_format])
+                outfile = os.path.join(out_folder, f"{basename}{addendum}.{out_format}")
+                df.to_csv(outfile, header=False, index=False, sep=EXT_TO_SEP[out_format])
     elif out_format in PROCESS_EXTENSIONS:
         if has_comment_lines and keep_nontabular:
             raise OptionNotAllowed("Non tabular data in Excel files is not allowed! Nontabular data in csv/tsv is deprecated but tolerated")
         engine = _get_excel_writer_engine(out_format)
-        logger.info(os.path.join(out_folder, f"{basename}.{out_format}"))
-        with pd.ExcelWriter(os.path.join(out_folder, f"{basename}.{out_format}"), engine=engine) as writer:
+        outfile = os.path.join(out_folder, f"{basename}.{out_format}")        
+        with pd.ExcelWriter(outfile, engine=engine) as writer:
             for sheet_name, df in dfs.items():
                 new_sheet_name = _safe_sheet_name(sheet_name)
                 df.to_excel(writer, sheet_name=new_sheet_name, index=False, header=False)
@@ -1151,6 +1158,7 @@ def convert_file(file, out_format=None, destfol=None, destfbname=None,
         raise InvalidFileFormatError("Unsupported output format {out_format}")
     if inplace and ext != out_format:
         os.remove(file)
+    logger.debug(f"Succesfully converted {file} into {outfile}")
 
 def detect_table(bool_df, point):
     x, y = point
@@ -1280,6 +1288,7 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
     if os.path.isdir(path):
         if destination:
             destination = helpers.check_and_clean_folderpath(destination)
+            os.makedirs(destination, exist_ok=True)
         source_fol: str = helpers.check_and_clean_folderpath(path)
         for fol, subfols, files in os.walk(source_fol):
             if destination:
@@ -1299,6 +1308,7 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
                     except Exception as e:
                         logger.error(f"Failed to process {file_path}: {e}")
                 elif not inplace:
+                    logger.info(f"Copying file: {file_path}")
                     sh.copy2(file_path, os.path.join(correspfol, file))
     elif os.path.isfile(path):
         if not path.lower().endswith(TABULAR_EXTENSIONS):
@@ -1308,7 +1318,7 @@ def process_recursively(path: str, file_func: Callable[..., None], destination=N
         if helpers.isdir(destination):
             destfol, destfbname = destination, None
         elif helpers.isfile(destination):
-           destfol, destfname = os.path.split(destination)
+           destfol, destfname = helpers.split(destination)
            destfbname, _ = os.path.splitext(destfname)
            ext = _[1:]
            assert ext == out_format, "The destination is a filepath that does not match the desired output format!!"
@@ -1391,7 +1401,7 @@ def process_command(args):
                 if helpers.isdir(args.destination):
                     destfol, destfbname = args.destination, None
                 elif helpers.isfile(args.destination):
-                    destfol, destfname = os.path.split(args.destination)
+                    destfol, destfname = helpers.split(args.destination)
                     destfbname, _ = os.path.splitext(destfname)
                     ext_out = _[1:]
                     if args.out_format:
@@ -1418,7 +1428,7 @@ def convert_command(args):
                     convert_file(args.source, out_format=args.out_format, destfol=args.destination,
                                  inplace=args.inplace, sep=sep, keep_nontabular=args.keep_nontabular)
                 elif helpers.isfile(args.destination):
-                    destfol, destfname = os.path.split(args.destination)
+                    destfol, destfname = helpers.split(args.destination)
                     destfbname, _ = os.path.splitext(destfname)
                     ext = _[1:]
                     assert ext == helpers.harmonize_ext(args.out_format), "The destination is a filepath that does not match the desired output format!!"
@@ -1584,7 +1594,7 @@ def cli():
         help='Modify the source file(s) in-place.'
     )
     location_group_convert.add_argument(
-        '--destination', '--dest',
+        '--destination', '--dest', '-d',
         type=str,
         dest='destination',
         help='The destination file or directory for the output.'
@@ -1593,7 +1603,7 @@ def cli():
     parser_convert.add_argument(
         '--separator', '--sep', '-s',
         dest="sep",
-        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. For space or semicolon, wrap it in quotation marks.
+        help='''The separator used (e.g. "," or ";"). Space is the default for .txt and .dat. For space or semicolon, wrap it in quotation marks. For tab, use "\t", in quotation marks.
         '''
     )
     

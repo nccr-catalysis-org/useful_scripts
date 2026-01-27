@@ -93,7 +93,7 @@ def process_file(path, enc=None, inplace=None, dest=None, check_dest=True):
     else:
         with open(dest, 'w', encoding='utf-8') as f:
             f.write(decoded_text)
-        logger.info(f"Converted to UTF-8 {dest}" if inplace else f"Converted {path} into {dest} (UTF-8)")
+        logger.info(f"Converted from {encoding} to UTF-8 {dest}" if inplace else f"Converted {path} from {encoding} into {dest} (UTF-8)")
     
             
 def process_recursively(path, formats=None, enc=None, inplace=False, dest=None):
@@ -177,7 +177,7 @@ def cli():
     parser_convert.add_argument('--inplace', action='store_true', help="Overwrite original files")
     parser_convert.add_argument('--destination', '--dest', '-d', type=str, help="Destination path/directory")
     parser_convert.add_argument('--enc', type=str, help="Expected encoding. Use it if you know it, it will make the conversion faster and more robust.")
-    parser_convert.add_argument('--formats', type=str, default=".txt", help="Comma-separated list of extensions to process (e.g. 'txt,csv'). You can either use no space or wrap the list in quotation marks.")
+    parser_convert.add_argument('--formats', '--format', '-f', type=str, default=".txt", help="Comma-separated list of extensions to process (e.g. 'txt,csv'). You can either use no space or wrap the list in quotation marks.")
 
     if importlib.util.find_spec("argcomplete"):
         import argcomplete

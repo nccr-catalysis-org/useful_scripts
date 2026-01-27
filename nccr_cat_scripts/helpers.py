@@ -35,3 +35,7 @@ def harmonize_ext(ext):
     if ext.startswith("."):
         return ext[1:]
     return ext
+
+def split(path):
+    first, second = os.path.split(path)
+    return (first if first else None, second)
