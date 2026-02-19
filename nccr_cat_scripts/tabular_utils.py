@@ -675,7 +675,7 @@ def check_recursively(folder_path: str, check_padding: bool, check_strip: bool,
  # Table manipulations
  ###############################################################################
        
-def read_sheets(file, frmt=None):
+def read_sheets(file, frmt=None, naked=False):
     """
     Reads an Excel (xlsx/xls) or CSV file into a pandas DataFrame.
     """
@@ -690,27 +690,30 @@ def read_sheets(file, frmt=None):
         sep = EXT_TO_SEP[frmt]
         # Read csv
         fname = os.path.splitext(os.path.split(file)[1])[0]
-        sheets = {fname: {"df": pd.read_csv(file, sep=sep)}}
-        # Re-read the file to capture the actual first row as the list of column names
-        try:
-            # Set header=None and read only the first row
-            columns_df = pd.read_csv(file, nrows=1, header=None, sep=sep)
-            # Extract the original column names (potentially non-unique)
-            sheets[fname]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
-        except Exception as e:
-            logger.warning(f"Could not read first row for original column names in {file}: {e}")
-            sheets[fname]["columns"] = sheets[fname]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
-    elif frmt in PROCESS_EXTENSIONS:
-        sheets = {k: {"df": v} for k, v in pd.read_excel(file, sheet_name=None).items()}
-        for sheet_name, dict_ in sheets.items():
+        df = pd.read_csv(file, sep=sep, header=None if naked else "infer")
+        sheets = {fname: df if naked else {"df": df}}
+        if not naked:
+            # Re-read the file to capture the actual first row as the list of column names
             try:
                 # Set header=None and read only the first row
-                columns_df = pd.read_excel(file, nrows=1, header=None, sheet_name=sheet_name)
+                columns_df = pd.read_csv(file, nrows=1, header=None, sep=sep)
                 # Extract the original column names (potentially non-unique)
-                sheets[sheet_name]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
+                sheets[fname]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
             except Exception as e:
                 logger.warning(f"Could not read first row for original column names in {file}: {e}")
-                sheets[sheet_name]["columns"] = sheets[sheet_name]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
+                sheets[fname]["columns"] = sheets[fname]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
+    elif frmt in PROCESS_EXTENSIONS:
+        sheets = {k: v if naked else {"df": v} for k, v in pd.read_excel(file, sheet_name=None, header=None if naked else 0).items()}
+        if not naked:
+            for sheet_name, dict_ in sheets.items():
+                try:
+                    # Set header=None and read only the first row
+                    columns_df = pd.read_excel(file, nrows=1, header=None, sheet_name=sheet_name)
+                    # Extract the original column names (potentially non-unique)
+                    sheets[sheet_name]["columns"] = columns_df.iloc[0].fillna(value="").astype(str).tolist()
+                except Exception as e:
+                    logger.warning(f"Could not read first row for original column names in {file}: {e}")
+                    sheets[sheet_name]["columns"] = sheets[sheet_name]["df"].columns.astype(str).tolist() # Fallback to pandas detected headers
     else:
          raise InvalidFileFormatError(f"Unsupported format for reading: {frmt}")
 
@@ -789,6 +792,36 @@ def _get_excel_writer_engine(out_format: str) -> str:
     else:
         raise InvalidFileFormatError(f"Unsupported Excel format for writing: {out_format}")
 
+def write_sheets(dfs, destfol, destfbname="", frmt=None):
+    if frmt is None:
+        logger.critical("You must specify and output format between: csv, tsv, xlsx, xls (deprecated) and pass it as 'frmt=[desired_format]'")
+        raise ValueError("You must specify and output format between: csv, tsv, xlsx, xls (deprecated) and pass it as 'frmt=[desired_format]'")
+    frmt = helpers.harmonize_ext(frmt)
+    if frmt not in TABULAR_EXTENSIONS :
+        logger.critical("You must specify and output format between: csv, tsv, xlsx, xls (deprecated)")
+        raise ValueError("You must specify and output format between: csv, tsv, xlsx, xls (deprecated)")
+    if frmt in PROCESS_EXTENSIONS:
+        fpath = os.path.join(destfol, f"{destfbname}.{frmt}")
+        if len(fpath) > 218:
+            logger.critical("""Cannot write output because the resulting filepath would be more than 218 character(max allowed by Excel)! 
+                            Find a way to shorten your filepath (shorter folder/filenames, less nesting). Attempted filepath: {fpath}""")
+            raise ValueError
+        try:
+            engine = _get_excel_writer_engine(frmt)
+            with pd.ExcelWriter(fpath, engine=engine) as writer:
+                for sheet_name, df in dfs.items():
+                    new_sheet_name = _safe_sheet_name(sheet_name)
+                    df.to_excel(writer, sheet_name=new_sheet_name, header=True)
+            logger.info(f"Successfully written sheets in {fpath}")
+        except Exception as e:
+            logger.error(f"Error writing {fpath}: {e}")
+    elif frmt in STRICT_SEP_EXTENSIONS:
+        for name, df in dfs.items():
+            basename = f"{destfbname}{'_' if destfbname else''}{name}.{frmt}"
+            fpath = os.path.join(destfol, basename)
+            df.to_csv(fpath, sep=EXT_TO_SEP[frmt])
+            logger.info(f"Successfully written {fpath}")
+            
 def write_tables(tables_per_sheet, source_file, out_format, destfol, destfbname,
                  inplace, operation, operation_name):
     destfol = helpers.check_and_clean_folderpath(destfol)
@@ -1094,6 +1127,130 @@ def hsplit_tables(file, in_format=None, out_format=None, inplace=False, destfol=
     
     out_format = in_format if out_format is None else helpers.harmonize_ext(out_format)
     write_tables(tables_per_sheet, file, out_format, destfol, destfbname, inplace, "hsplit", "split tables horizontally")
+
+def read_multi_index_csv(file, header=[0, 1], index_col=0, sep=","):
+    """
+
+    Parameters
+    ----------
+    file : str
+        the file to read.
+    header : List[int], optional
+        The rows with column labels. The default is [0, 1].
+    index_col : TYPE, optional
+        the column with index. The default is 0.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    df = pd.read_csv(file, header=header, index_col=index_col, sep=sep)
+
+    def _fix(idx):
+        if not isinstance(idx, pd.MultiIndex): 
+            return idx
+        # Build levels using your list comprehension logic
+        lvls = [
+            idx.get_level_values(i).to_series()
+               .mask(lambda s: s.str.contains('Unnamed|^$|^\s+$', na=False))
+               .ffill().values 
+            for i in range(idx.nlevels)
+        ]
+        return pd.MultiIndex.from_arrays(lvls, names=idx.names)
+
+    df.columns = _fix(df.columns)
+    df.index = _fix(df.index)
+    return df
+
+
+def smart_read_multiindex(file_path, in_format=None):
+    def try_numeric(series):
+        """Replacement for deprecated errors='ignore'."""
+        try:
+            return pd.to_numeric(series)
+        except (ValueError, TypeError):
+            return series
+    # Assuming read_sheets is defined elsewhere as described
+    dfs, frmt = read_sheets(file_path, frmt=in_format, naked=True)
+    processed_results = {}
+
+    for name, df in dfs.items():
+        # 1. Standardize empty/whitespace/Pandas-placeholders to NaN
+        df = df.replace(r'^\s*$', np.nan, regex=True)
+        
+        def get_stats(series):
+            """Helper to identify cell types in a row or column."""
+            # numeric: actual numbers
+            is_num = pd.to_numeric(series, errors='coerce').notnull()
+            # empty: NaN, empty strings, or the 'Unnamed' string Pandas gives to merged cells
+            is_emp = series.isna() | series.astype(str).str.contains('^Unnamed|^nan$|^\s*$', na=False)
+            # label: The "neither numeric nor empty" cells you requested
+            is_lab = ~(is_num | is_emp)
+            return is_num, is_lab
+
+        # 2. DETECT INDEX COLUMNS (Look Vertically)
+        # c = first column that is NOT an index (contains actual numeric data)
+        c = 0
+        for col_idx in range(min(df.shape[1], 10)):
+            is_num, is_lab = get_stats(df.iloc[:, col_idx])
+            # If a column contains a significant amount of numbers, it's a data column
+            if is_num.mean() > 0.1: 
+                c = col_idx
+                break
+        
+        # 3. DETECT HEADER ROWS (Look Horizontally)
+        # r = first row where there are NO labels in the data-side columns
+        r = 0
+        for row_idx in range(min(df.shape[0], 20)):
+            # Only look at the data columns (c onwards) to avoid index labels
+            is_num, is_lab = get_stats(df.iloc[row_idx, c:])
+            
+            # A data row is defined by having NO labels and containing some numbers or being empty
+            # A header row is defined by having "neither numeric nor empty" cells (labels)
+            if is_lab.sum() == 0 and is_num.any():
+                r = row_idx
+                break
+
+        # 4. Helper for the mask & ffill logic we refined
+        def _fix_axis(block, is_horizontal=False):
+            if is_horizontal: # Fixing Header Rows
+                lvls = [pd.Series(block.iloc[i]).mask(lambda s: s.astype(str).str.contains('Unnamed|^nan$|^\s+$', na=False)).ffill().values 
+                        for i in range(block.shape[0])]
+            else: # Fixing Index Columns
+                lvls = [pd.Series(block.iloc[:, j]).mask(lambda s: s.astype(str).str.contains('Unnamed|^nan$|^\s+$', na=False)).ffill().values 
+                        for j in range(block.shape[1])]
+            
+            if not lvls: return None
+            if len(lvls) > 1:
+                return pd.MultiIndex.from_arrays(lvls)
+            return pd.Index(lvls[0])
+
+        # 5. Partition and Reassemble
+        data_block = df.iloc[r:, c:].copy()
+
+        if r > 0:
+            data_block.columns = _fix_axis(df.iloc[:r, c:], is_horizontal=True)
+        if c > 0:
+            idx = _fix_axis(df.iloc[r:, :c], is_horizontal=False)
+            # Restore index names from the row immediately above the data
+            if r > 0:
+                idx.names = [n if not pd.isna(n) else None for n in df.iloc[r-1, :c].tolist()]
+            data_block.index = idx
+
+        # Final cleanup: ensure the data area is numeric
+        processed_results[name] = data_block.apply(try_numeric)
+        logger.info(f"{file_path}, sheet: {name}, header: {list(range(r))}, index_col: {list(range(c))}")
+
+    return processed_results, frmt
+
+def fix_missing_cells_multiindex(file_path, in_format=None, out_format=None, destfol=None, destfbname=None, inplace=False):
+    if inplace and any(destfol, destfbname):
+        raise ValueError("Contraddictory information: inplace or with destination?")
+    dfs, frmt = smart_read_multiindex(file_path, in_format=in_format)
+    write_sheets(dfs, destfol if destfol else os.path.split(file_path)[0],
+                 frmt=out_format if out_format else frmt, destfbname=destfbname if destfbname else "")
 
 def read_sep_tab(file, sep):
     with open(file, "r") as f:
@@ -1413,6 +1570,8 @@ def process_command(args):
             split_func = split_tables_file
         elif args.split_to_multiindex:
             split_func = split_tables_to_multiindex
+        elif args.multiindex_fix_missing_cells:
+            split_func = fix_missing_cells_multiindex
         if os.path.isfile(args.source):
             if args.in_formats:
                 logger.info("You passed a --in-format argument but this will be ignored since your source is a file. The extension will be detected from the filename.")
@@ -1562,6 +1721,8 @@ def cli():
     process_group.add_argument('--hsplit-tables', '--hsplit', action='store_true', help='Split horizontal multitables')
     process_group.add_argument('--split-all-tables', '--splitall', action='store_true', help='Split all multitables')
     process_group.add_argument('--split-to-multiindex', '--multiindex', '--multi-idx', action='store_true', help='Turn multi-tables into a MultiIndex')
+    process_group.add_argument('--multiindex-fix-missing-cells', '--fix-multiindex', '--multi-idx-fix', action='store_true', help='Uses a forward fill for missing cells in header or index columns')
+    
     
     # Mutually Exclusive Group for 'check' options
     check_group = parser_check.add_mutually_exclusive_group(required=True)
